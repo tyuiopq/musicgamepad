@@ -1,0 +1,89 @@
+:root {
+  --bg: #101015;
+  --panel: #15151c;
+  --raised: #18181f;
+  --key: #23232d;
+  --line: #23232d;
+  --line-strong: #2f2f3c;
+  --text: #ececf2;
+  --muted: #9696a8;
+  /* ноты */
+  --accent: #f2b84b;
+  --accent-soft: #2a2416;
+  /* модификаторы */
+  --mod: #5cc8e8;
+  --mod-soft: #12303a;
+  --rec: #ff6070;
+  --rec-text: #ff8a95;
+  --error: #ff8a7a;
+  /* цвета букв на кнопках Xbox */
+  --face-y: #e7c35a;
+  --face-x: #6aa8ff;
+  --face-b: #ff7b7b;
+  --face-a: #7bd88f;
+
+  --font: "Golos Text", system-ui, sans-serif;
+  --font-display: "Unbounded", var(--font);
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  color-scheme: dark;
+  font-family: var(--font);
+  font-size: 15px;
+  color: var(--text);
+  background: var(--bg);
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+button,
+select {
+  font: inherit;
+  color: var(--text);
+}
+
+button {
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 2px solid var(--mod);
+  outline-offset: 2px;
+}
+
+.section-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  white-space: nowrap;
+}
+
+.chip.mod {
+  border-color: var(--mod);
+  color: var(--mod);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.error {
+  color: var(--error);
+  font-size: 13px;
+  margin: 0;
+}

@@ -1,16 +1,33 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { api, type PadFamily, type ProfileEntry, type Status } from "$lib/api";
-  import { familyName, keyLabel, noteName, solfege } from "$lib/labels";
+  import { api, type PadFamily, type Profile, type ProfileEntry, type Status } from "$lib/api";
+  import Gamepad from "$lib/components/Gamepad.svelte";
+  import PianoRoll from "$lib/components/PianoRoll.svelte";
+  import Sidebar from "$lib/components/Sidebar.svelte";
+  import { effectLabel } from "$lib/describe";
+  import { keyLabel, noteName, solfege } from "$lib/labels";
 
   let status = $state<Status | null>(null);
-  let ports = $state<string[]>([]);
+  let profile = $state<Profile | null>(null);
   let profiles = $state<ProfileEntry[]>([]);
+  let ports = $state<string[]>([]);
   let error = $state<string | null>(null);
 
   const activePad = $derived(status?.pads.find((p) => p.id === status?.active_pad) ?? null);
   const family = $derived<PadFamily>(activePad?.family ?? "xbox");
-  const fileName = (path: string | null) => path?.split(/[\\/]/).pop() ?? null;
+  const tonic = $derived(status?.music ? (status.music.octave + 1) * 12 + status.music.root : 60);
+
+  // Включённые модификаторы — для строки над схемой
+  const activeMods = $derived(
+    (status?.controls ?? []).flatMap((v) => {
+      if (v.role !== "modifier" || !v.active || v.input.kind === "axis") return [];
+      const key =
+        v.input.kind === "button"
+          ? ({ kind: "button", button: v.input.button } as const)
+          : ({ kind: "axis_switch", axis: v.input.axis, direction: v.input.direction } as const);
+      return [{ key: keyLabel(key, family), label: effectLabel(v.effect, profile) }];
+    }),
+  );
 
   async function run(action: () => Promise<unknown>) {
     try {
@@ -25,349 +42,150 @@
     ports = await api.midiPorts();
   }
 
+  // При смене профиля подтягиваем его целиком (названия слоёв и т.п.)
+  $effect(() => {
+    const name = status?.profile;
+    if (name && name !== profile?.name) api.profile().then((p) => (profile = p));
+  });
+
   onMount(() => {
     const unlisten = api.onStatus((s) => (status = s));
     api.status().then((s) => (status ??= s));
-    refreshPorts();
     api.profiles().then((p) => (profiles = p));
+    refreshPorts();
     return () => {
       unlisten.then((f) => f());
     };
   });
 </script>
 
-<main>
-  <header>
-    <h1>MusicGamepad</h1>
-    {#if status}
-      <label class="profile">
-        Профиль
-        <select
-          value={status.profile}
-          onchange={(e) => run(() => api.selectProfile(e.currentTarget.value))}
-        >
-          {#each profiles as p (p.name)}
-            <option value={p.name}>{p.name}{p.builtin ? "" : " ★"}</option>
-          {/each}
-        </select>
-      </label>
-      <button class="rec" class:on={status.recording} onclick={() => run(api.toggleRecord)}>
-        {status.recording ? "■ Стоп" : "● Запись"}
-      </button>
-      <button class="ghost" title="Заглушить все ноты" onclick={() => run(api.panic)}>Тишина</button>
-    {/if}
-  </header>
+{#if !status}
+  <p class="loading muted">Запускаю движок…</p>
+{:else}
+  <div class="app">
+    <Sidebar {status} {profiles} {ports} {run} {refreshPorts} />
 
-  {#if error}<p class="error">{error}</p>{/if}
-
-  {#if !status}
-    <p class="muted">Запускаю движок…</p>
-  {:else}
-    <section class="now">
-      <div class="notes" class:silent={status.notes.length === 0}>
-        {#if status.notes.length}
-          {#each status.notes as n (n)}
-            <span class="note"><b>{noteName(n)}</b><small>{solfege(n)}</small></span>
-          {/each}
-        {:else}
-          <span class="placeholder">Нажми кнопку на геймпаде</span>
-        {/if}
-      </div>
-      <div class="facts">
-        {#each status.parts as part (part.channel)}
-          <div><span class="muted">{part.name}:</span> {part.instrument}</div>
-        {/each}
-        <div>
-          <span class="muted">Слои:</span>
-          {#each status.layers as layer, i (layer)}
-            <span class="chip" class:accent={i > 0}>{layer}</span>
-          {/each}
-        </div>
-        <div>
-          <span class="muted">Сдвиг:</span>
-          {status.transpose > 0 ? "+" : ""}{status.transpose} полутонов
-        </div>
-        <div class="pressed">
-          <span class="muted">Зажато:</span>
-          {#each status.pressed as key (JSON.stringify(key))}
-            <span class="chip">{keyLabel(key, family)}</span>
+    <main>
+      <header>
+        <div class="now" aria-live="polite">
+          {#if status.notes.length === 0}
+            <span class="hint">Нажми кнопку на геймпаде</span>
+          {:else if status.notes.length === 1}
+            <span class="big">{noteName(status.notes[0])}</span>
+            <span class="solfege">{solfege(status.notes[0])}</span>
           {:else}
-            <span class="muted">—</span>
-          {/each}
-        </div>
-      </div>
-    </section>
-
-    <div class="grid">
-      <section>
-        <h2>Геймпад</h2>
-        {#if status.input_error}<p class="error">{status.input_error}</p>{/if}
-        <label class="option">
-          <input
-            type="radio"
-            name="pad"
-            checked={status.pad_choice.mode === "auto"}
-            onchange={() => run(() => api.setPadChoice({ mode: "auto" }))}
-          />
-          <span>Автоматически <small class="muted">— тот, на котором играешь</small></span>
-        </label>
-        {#each status.pads as pad (pad.id)}
-          <label class="option">
-            <input
-              type="radio"
-              name="pad"
-              checked={status.pad_choice.mode === "fixed" && status.pad_choice.name === pad.name}
-              onchange={() => run(() => api.setPadChoice({ mode: "fixed", name: pad.name }))}
-            />
-            <span>
-              {pad.name}
-              <small class="muted">{familyName[pad.family]} · {pad.model}</small>
-              {#if pad.id === status.active_pad}<span class="chip accent">играет</span>{/if}
-            </span>
-          </label>
-        {:else}
-          <p class="muted">Подключи геймпад — он появится здесь.</p>
-        {/each}
-        {#if status.pad_choice.mode === "fixed" && !status.pads.some((p) => status?.pad_choice.mode === "fixed" && p.name === status.pad_choice.name)}
-          <p class="muted">Выбранный «{status.pad_choice.name}» не подключён.</p>
-        {/if}
-      </section>
-
-      <section>
-        <h2>Звук</h2>
-        <label class="option">
-          <input
-            type="checkbox"
-            checked={status.synth.enabled}
-            onchange={(e) => run(() => api.setSynthEnabled(e.currentTarget.checked))}
-          />
-          <span>Встроенный синтезатор</span>
-        </label>
-        {#if status.synth.error}<p class="error">{status.synth.error}</p>{/if}
-        <dl>
-          <dt>Банк</dt>
-          <dd>{fileName(status.synth.soundfont) ?? "—"}</dd>
-          <dt>Устройство</dt>
-          <dd>{status.synth.device ?? "—"}</dd>
-          <dt>Буфер</dt>
-          <dd>{status.synth.buffer_ms ? `${status.synth.buffer_ms.toFixed(1)} мс` : "—"}</dd>
-        </dl>
-      </section>
-
-      <section>
-        <h2>MIDI-выход</h2>
-        <div class="row">
-          <select
-            value={status.midi.port ?? ""}
-            onchange={(e) => run(() => api.setMidiOut(e.currentTarget.value || null))}
-          >
-            <option value="">Выключен</option>
-            {#each ports as p (p)}<option value={p}>{p}</option>{/each}
-          </select>
-          <button class="ghost" title="Обновить список" onclick={() => run(refreshPorts)}>↻</button>
-        </div>
-        {#if status.midi.error}<p class="error">{status.midi.error}</p>{/if}
-        <p class="muted small">
-          Чтобы играть в FL Studio или другой DAW, создай виртуальный порт в loopMIDI и выбери его
-          здесь. Встроенный синтезатор тогда лучше выключить.
-        </p>
-      </section>
-
-      <section>
-        <h2>Запись</h2>
-        <p>
-          {#if status.recording}
-            <span class="rec-dot"></span> Идёт запись…
-          {:else if status.last_recording}
-            Сохранено: <b>{fileName(status.last_recording)}</b>
-          {:else}
-            <span class="muted">Start на геймпаде или кнопка «Запись» наверху.</span>
+            <span class="big several">{status.notes.map(noteName).join(" ")}</span>
           {/if}
-        </p>
-        <button class="ghost" onclick={() => run(api.openRecordings)}>Открыть папку записей</button>
+        </div>
+        <div class="chips">
+          {#each status.parts as part (part.channel)}
+            <span class="chip">{part.instrument}</span>
+          {/each}
+          {#each status.layers.slice(1) as layer (layer)}
+            <span class="chip mod">Слой: {layer}</span>
+          {/each}
+          {#each activeMods as m (m.key + m.label)}
+            <span class="chip mod">{m.key} · {m.label}</span>
+          {/each}
+        </div>
+      </header>
+
+      {#if error}<p class="error">{error}</p>{/if}
+
+      <section class="pad-area">
+        {#if status.pads.length === 0}
+          <p class="muted empty">Геймпад не подключён. Ниже — раскладка профиля «{status.profile}».</p>
+        {/if}
+        <Gamepad {status} {family} {profile} />
       </section>
-    </div>
-  {/if}
-</main>
+
+      <section class="roll">
+        <div class="roll-head">
+          <span class="section-title">Последние ноты</span>
+          <span class="muted">10 с</span>
+        </div>
+        <PianoRoll notes={status.notes} {tonic} />
+      </section>
+    </main>
+  </div>
+{/if}
 
 <style>
-  :global(:root) {
-    --bg: #14141c;
-    --panel: #1d1d28;
-    --line: #2c2c3a;
-    --text: #e8e8f0;
-    --muted: #8a8aa0;
-    --accent: #7c9cff;
-    --rec: #ff5a6a;
-    --error: #ff8a7a;
-    color-scheme: dark;
-    font-family: "Segoe UI", system-ui, sans-serif;
-    font-size: 15px;
-    color: var(--text);
-    background: var(--bg);
+  .loading {
+    padding: 24px;
   }
-  :global(body) {
-    margin: 0;
+  .app {
+    display: flex;
+    min-height: 100vh;
   }
   main {
-    padding: 20px 24px;
-    max-width: 1000px;
-    margin: 0 auto;
+    flex: 1;
+    min-width: 0;
+    padding: 22px 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
   }
   header {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 12px;
-    margin-bottom: 16px;
-  }
-  h1 {
-    font-size: 20px;
-    margin: 0 auto 0 0;
-    letter-spacing: 0.02em;
-  }
-  h2 {
-    font-size: 13px;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--muted);
-    margin: 0 0 12px;
-  }
-  section {
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    padding: 16px;
-  }
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 12px;
-    margin-top: 12px;
+    gap: 20px;
+    min-height: 64px;
   }
   .now {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 16px;
-    align-items: center;
-  }
-  .notes {
     display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    min-height: 84px;
-    align-items: center;
+    align-items: baseline;
+    gap: 12px;
+    min-width: 200px;
   }
-  .note {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 10px 14px;
-    border-radius: 10px;
-    background: color-mix(in srgb, var(--accent) 22%, transparent);
-    border: 1px solid var(--accent);
-  }
-  .note b {
-    font-size: 26px;
-  }
-  .placeholder {
-    color: var(--muted);
-  }
-  .facts {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-  .chip {
-    display: inline-block;
-    padding: 1px 8px;
-    margin: 0 4px 2px 0;
-    border-radius: 999px;
-    border: 1px solid var(--line);
-    font-size: 13px;
-  }
-  .chip.accent {
-    border-color: var(--accent);
+  .big {
+    font-family: var(--font-display);
+    font-size: 56px;
+    font-weight: 700;
+    line-height: 1;
     color: var(--accent);
   }
-  .option {
-    display: flex;
-    gap: 10px;
-    align-items: baseline;
-    padding: 6px 0;
-    cursor: pointer;
+  .big.several {
+    font-size: 32px;
   }
-  .row {
+  .solfege {
+    font-size: 22px;
+  }
+  .hint {
+    color: var(--muted);
+    font-size: 18px;
+  }
+  .chips {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
   }
-  .row select {
-    flex: 1;
-  }
-  dl {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 4px 12px;
-    margin: 8px 0 0;
-  }
-  dt {
-    color: var(--muted);
-  }
-  dd {
-    margin: 0;
-    overflow-wrap: anywhere;
-  }
-  .muted {
-    color: var(--muted);
-  }
-  .small {
-    font-size: 13px;
-  }
-  .error {
-    color: var(--error);
-  }
-  select,
-  button {
-    font: inherit;
-    color: var(--text);
-    background: var(--bg);
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    padding: 6px 10px;
-  }
-  button {
-    cursor: pointer;
-  }
-  button:hover,
-  select:hover {
-    border-color: var(--accent);
-  }
-  .rec.on {
-    background: var(--rec);
-    border-color: var(--rec);
-    color: white;
-  }
-  .rec-dot {
-    display: inline-block;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background: var(--rec);
-    animation: blink 1s infinite;
-  }
-  @keyframes blink {
-    50% {
-      opacity: 0.3;
-    }
-  }
-  .profile {
+  .pad-area {
     display: flex;
-    gap: 8px;
+    flex-direction: column;
     align-items: center;
-    color: var(--muted);
   }
-  @media (max-width: 700px) {
-    .now {
-      grid-template-columns: 1fr;
-    }
+  .empty {
+    margin: 0 0 8px;
+  }
+  .roll {
+    flex: 1;
+    min-height: 180px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 12px 14px 14px;
+  }
+  .roll-head {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+  }
+  .roll :global(.roll) {
+    flex: 1;
   }
 </style>

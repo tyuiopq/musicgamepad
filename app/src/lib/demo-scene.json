@@ -1,0 +1,245 @@
+{
+  "axes": {
+    "right_trigger": 0.6200000047683716,
+    "right_x": 0.44999998807907104
+  },
+  "controls": [
+    {
+      "chord": false,
+      "input": {
+        "button": "dpad_left",
+        "kind": "button"
+      },
+      "layer": "base",
+      "notes": [
+        48
+      ],
+      "role": "note"
+    },
+    {
+      "chord": false,
+      "input": {
+        "button": "dpad_down",
+        "kind": "button"
+      },
+      "layer": "base",
+      "notes": [
+        50
+      ],
+      "role": "note"
+    },
+    {
+      "chord": false,
+      "input": {
+        "button": "dpad_right",
+        "kind": "button"
+      },
+      "layer": "base",
+      "notes": [
+        52
+      ],
+      "role": "note"
+    },
+    {
+      "chord": false,
+      "input": {
+        "button": "dpad_up",
+        "kind": "button"
+      },
+      "layer": "base",
+      "notes": [
+        53
+      ],
+      "role": "note"
+    },
+    {
+      "chord": false,
+      "input": {
+        "button": "west",
+        "kind": "button"
+      },
+      "layer": "base",
+      "notes": [
+        55
+      ],
+      "role": "note"
+    },
+    {
+      "chord": false,
+      "input": {
+        "button": "south",
+        "kind": "button"
+      },
+      "layer": "base",
+      "notes": [
+        57
+      ],
+      "role": "note"
+    },
+    {
+      "chord": false,
+      "input": {
+        "button": "east",
+        "kind": "button"
+      },
+      "layer": "base",
+      "notes": [
+        59
+      ],
+      "role": "note"
+    },
+    {
+      "chord": false,
+      "input": {
+        "button": "north",
+        "kind": "button"
+      },
+      "layer": "base",
+      "notes": [
+        60
+      ],
+      "role": "note"
+    },
+    {
+      "active": true,
+      "effect": {
+        "octaves": -1,
+        "type": "octaves"
+      },
+      "input": {
+        "button": "left_shoulder",
+        "kind": "button"
+      },
+      "latch": "hold",
+      "layer": "base",
+      "role": "modifier"
+    },
+    {
+      "active": false,
+      "effect": {
+        "octaves": 1,
+        "type": "octaves"
+      },
+      "input": {
+        "button": "right_shoulder",
+        "kind": "button"
+      },
+      "latch": "hold",
+      "layer": "base",
+      "role": "modifier"
+    },
+    {
+      "active": false,
+      "effect": {
+        "semitones": 1,
+        "type": "semitones"
+      },
+      "input": {
+        "axis": "left_trigger",
+        "direction": "positive",
+        "kind": "axis_switch",
+        "threshold": 0.5
+      },
+      "latch": "hold",
+      "layer": "base",
+      "role": "modifier"
+    },
+    {
+      "active": false,
+      "effect": {
+        "layer": "chords",
+        "type": "layer"
+      },
+      "input": {
+        "button": "left_stick",
+        "kind": "button"
+      },
+      "latch": "toggle",
+      "layer": "base",
+      "role": "modifier"
+    },
+    {
+      "command": {
+        "part": 0,
+        "type": "next_instrument"
+      },
+      "input": {
+        "button": "back",
+        "kind": "button"
+      },
+      "layer": "base",
+      "role": "command"
+    },
+    {
+      "command": {
+        "type": "toggle_record"
+      },
+      "input": {
+        "button": "start",
+        "kind": "button"
+      },
+      "layer": "base",
+      "role": "command"
+    },
+    {
+      "input": {
+        "axis": "right_trigger",
+        "kind": "axis"
+      },
+      "layer": "base",
+      "role": "control",
+      "target": {
+        "cc": 11,
+        "max": 127,
+        "min": 40,
+        "type": "cc"
+      }
+    },
+    {
+      "input": {
+        "axis": "right_x",
+        "kind": "axis"
+      },
+      "layer": "base",
+      "role": "control",
+      "target": {
+        "type": "pitch_bend"
+      }
+    },
+    {
+      "input": {
+        "axis": "right_y",
+        "kind": "axis"
+      },
+      "layer": "base",
+      "role": "control",
+      "target": {
+        "cc": 1,
+        "max": 127,
+        "min": 0,
+        "type": "cc"
+      }
+    }
+  ],
+  "music": {
+    "octave": 4,
+    "root": 0,
+    "scale": {
+      "preset": "major",
+      "type": "preset"
+    }
+  },
+  "notes": [
+    57
+  ],
+  "pressed": [
+    {
+      "button": "south",
+      "kind": "button"
+    },
+    {
+      "button": "left_shoulder",
+      "kind": "button"
+    }
+  ]
+}
