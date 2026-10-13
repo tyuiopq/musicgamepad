@@ -100,12 +100,25 @@ export interface Status {
     enabled: boolean;
     soundfont: string | null;
     device: string | null;
-    buffer_ms: number | null;
+    requested_mode: AudioMode;
+    mode: AudioMode | null;
+    fallback: string | null;
     error: string | null;
+    latency: Latency | null;
   };
   midi: { port: string | null; error: string | null };
   recording: boolean;
   last_recording: string | null;
+}
+
+export type AudioMode = "exclusive" | "shared";
+
+/** Оценка «нажал → услышал», мс. */
+export interface Latency {
+  input: number | null;
+  block: number;
+  output: number;
+  total: number;
 }
 
 export interface ProfileEntry {
@@ -121,6 +134,7 @@ export const api = {
   profile: () => invoke<Profile>("get_profile"),
   setPadChoice: (choice: PadChoice) => invoke<void>("set_pad_choice", { choice }),
   setSynthEnabled: (enabled: boolean) => invoke<void>("set_synth_enabled", { enabled }),
+  setAudioMode: (mode: AudioMode) => invoke<void>("set_audio_mode", { mode }),
   setMidiOut: (port: string | null) => invoke<void>("set_midi_out", { port }),
   toggleRecord: () => invoke<void>("toggle_record"),
   panic: () => invoke<void>("panic"),

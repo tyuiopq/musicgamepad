@@ -5,7 +5,7 @@ use std::sync::Mutex;
 
 use engine::audio::PresetInfo;
 use engine::model::Profile;
-use engine::{presets, Command, Engine, EngineConfig, PadChoice, Settings, Status};
+use engine::{presets, AudioMode, Command, Engine, EngineConfig, PadChoice, Settings, Status};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
@@ -100,6 +100,12 @@ fn set_pad_choice(state: State<AppState>, choice: PadChoice) {
 fn set_synth_enabled(state: State<AppState>, enabled: bool) {
     state.update_settings(|s| s.synth_enabled = enabled);
     state.engine.send(Command::SetSynthEnabled(enabled));
+}
+
+#[tauri::command]
+fn set_audio_mode(state: State<AppState>, mode: AudioMode) {
+    state.update_settings(|s| s.audio_mode = mode);
+    state.engine.send(Command::SetAudioMode(mode));
 }
 
 #[tauri::command]
@@ -214,6 +220,7 @@ pub fn run() {
             list_midi_ports,
             set_pad_choice,
             set_synth_enabled,
+            set_audio_mode,
             set_midi_out,
             list_profiles,
             get_profile,

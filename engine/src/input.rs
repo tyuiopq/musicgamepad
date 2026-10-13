@@ -35,7 +35,8 @@ pub struct PadInfo {
 pub enum RawEvent {
     Added(PadInfo),
     Removed(u32),
-    Input { pad: u32, event: InputEvent },
+    /// `t_ns` — когда SDL получил событие, по часам `ticks_ns()`.
+    Input { pad: u32, event: InputEvent, t_ns: u64 },
 }
 
 pub struct GamepadInput {
@@ -89,19 +90,25 @@ impl GamepadInput {
                     out.push(RawEvent::Removed(which.raw()));
                 }
             }
-            Event::GamepadButtonDown { which, button, .. } | Event::GamepadButtonUp { which, button, .. } => {
+            Event::GamepadButtonDown { which, button, timestamp } | Event::GamepadButtonUp { which, button, timestamp } => {
                 let down = matches!(event, Event::GamepadButtonDown { .. });
                 if let Some(button) = map_button(button) {
-                    out.push(RawEvent::Input { pad: which.raw(), event: InputEvent::Button { button, down } });
+                    let event = InputEvent::Button { button, down };
+                    out.push(RawEvent::Input { pad: which.raw(), event, t_ns: timestamp });
                 }
             }
-            Event::GamepadAxisMotion { which, axis, value, .. } => {
+            Event::GamepadAxisMotion { which, axis, value, timestamp } => {
                 let (axis, value) = map_axis(axis, value);
-                out.push(RawEvent::Input { pad: which.raw(), event: InputEvent::Axis { axis, value } });
+                out.push(RawEvent::Input { pad: which.raw(), event: InputEvent::Axis { axis, value }, t_ns: timestamp });
             }
             _ => {}
         }
     }
+}
+
+/// Часы SDL, в которых проставлены метки времени событий.
+pub fn ticks_ns() -> u64 {
+    unsafe { sdl3::sys::timer::SDL_GetTicksNS() }
 }
 
 fn pad_info(id: JoystickId, pad: &Gamepad) -> PadInfo {

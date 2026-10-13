@@ -1,6 +1,8 @@
 //! Ядро: ввод с геймпада, раскладки, звук, MIDI.
 
 pub mod audio;
+#[cfg(windows)]
+mod audio_exclusive;
 pub mod engine;
 pub mod input;
 pub mod mapper;
@@ -10,4 +12,5 @@ pub mod model;
 pub mod presets;
 pub mod theory;
 
+pub use audio::AudioMode;
 pub use engine::{Command, Engine, EngineConfig, PadChoice, Settings, Status};

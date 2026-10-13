@@ -1,22 +1,37 @@
-//! Встроенный синтезатор: SoundFont через rustysynth, вывод через WASAPI.
+//! Встроенный синтезатор: SoundFont через rustysynth.
+//!
+//! Два вывода звука:
+//! - эксклюзивный WASAPI (`audio_exclusive.rs`) — период ~3 мс, но устройство занято только нами;
+//! - общий режим через cpal — уживается с другими программами, но Windows добавляет ~30 мс.
+//!
 //! MIDI передаётся в аудиопоток через lock-free очередь — аудиопоток никогда не ждёт.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use rtrb::{Producer, RingBuffer};
+use rtrb::{Consumer, Producer, RingBuffer};
 use rustysynth::{SoundFont, Synthesizer, SynthesizerSettings};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::midi::MidiMsg;
 
-/// Желаемый размер аудиобуфера в кадрах. Драйвер может дать больше.
+/// Желаемый размер буфера в общем режиме, кадров. Драйвер может дать больше.
 const PREFERRED_BUFFER: u32 = 256;
 /// Внутренний блок синтеза: чем меньше, тем точнее время нот внутри буфера.
 const SYNTH_BLOCK: usize = 64;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AudioMode {
+    /// Эксклюзивный режим: минимальная задержка, другие программы на устройстве молчат.
+    #[default]
+    Exclusive,
+    /// Общий режим Windows: звучит вместе с другими программами, задержка больше.
+    Shared,
+}
 
 #[derive(Clone, Debug, Serialize)]
 pub struct PresetInfo {
@@ -80,17 +95,101 @@ fn first_sf2(dir: &Path) -> Option<PathBuf> {
     files.into_iter().next()
 }
 
+/// Синтезатор внутри аудиопотока: забирает MIDI из очереди и считает звук.
+pub(crate) struct SynthCore {
+    synth: Synthesizer,
+    rx: Consumer<MidiMsg>,
+    left: Vec<f32>,
+    right: Vec<f32>,
+}
+
+impl SynthCore {
+    pub(crate) fn new(font: &Arc<SoundFont>, sample_rate: u32, rx: Consumer<MidiMsg>) -> anyhow::Result<Self> {
+        let mut settings = SynthesizerSettings::new(sample_rate as i32);
+        settings.block_size = SYNTH_BLOCK;
+        let synth = Synthesizer::new(font, &settings).map_err(|e| anyhow!("синтезатор: {e:?}"))?;
+        Ok(Self { synth, rx, left: vec![0.0; 4096], right: vec![0.0; 4096] })
+    }
+
+    /// Применить пришедший MIDI и посчитать `frames` кадров.
+    pub(crate) fn render(&mut self, frames: usize) -> (&[f32], &[f32]) {
+        while let Ok(m) = self.rx.pop() {
+            let [status, d1, d2] = m.bytes;
+            self.synth.process_midi_message((status & 0x0F) as i32, (status & 0xF0) as i32, d1 as i32, d2 as i32);
+        }
+        if self.left.len() < frames {
+            self.left.resize(frames, 0.0);
+            self.right.resize(frames, 0.0);
+        }
+        self.synth.render(&mut self.left[..frames], &mut self.right[..frames]);
+        (&self.left[..frames], &self.right[..frames])
+    }
+}
+
+/// Состояние аудиопотока, которое видит движок.
+#[derive(Default)]
+pub(crate) struct AudioShared {
+    pub failed: AtomicBool,
+    /// Оценка задержки вывода (от синтеза до ЦАП), мкс.
+    pub output_latency_us: AtomicU32,
+}
+
+/// Держит вывод живым; при удалении звук останавливается.
+#[allow(dead_code)]
+enum Backend {
+    Shared(cpal::Stream),
+    #[cfg(windows)]
+    Exclusive(crate::audio_exclusive::ExclusiveOutput),
+}
+
 pub struct Synth {
-    _stream: cpal::Stream,
+    _backend: Backend,
     tx: Producer<MidiMsg>,
-    failed: Arc<AtomicBool>,
+    shared: Arc<AudioShared>,
+    pub mode: AudioMode,
     pub device: String,
-    pub buffer_frames: Option<u32>,
     pub sample_rate: u32,
+    /// Период вывода, кадров.
+    pub period_frames: u32,
+    /// Почему не получилось включить эксклюзивный режим (если откатились на общий).
+    pub fallback: Option<String>,
 }
 
 impl Synth {
-    pub fn start(bank: &SoundBank) -> anyhow::Result<Self> {
+    /// Запускает вывод в режиме `mode`. Если эксклюзивный не удался — откатывается на общий.
+    pub fn start(bank: &SoundBank, mode: AudioMode) -> anyhow::Result<Self> {
+        #[cfg(windows)]
+        if mode == AudioMode::Exclusive {
+            match Self::start_exclusive(bank) {
+                Ok(s) => return Ok(s),
+                Err(e) => {
+                    let mut s = Self::start_shared(bank)?;
+                    s.fallback = Some(e.to_string());
+                    return Ok(s);
+                }
+            }
+        }
+        Self::start_shared(bank)
+    }
+
+    #[cfg(windows)]
+    fn start_exclusive(bank: &SoundBank) -> anyhow::Result<Self> {
+        let (tx, rx) = RingBuffer::<MidiMsg>::new(4096);
+        let shared = Arc::new(AudioShared::default());
+        let (out, info) = crate::audio_exclusive::ExclusiveOutput::start(bank.font.clone(), rx, shared.clone())?;
+        Ok(Self {
+            _backend: Backend::Exclusive(out),
+            tx,
+            shared,
+            mode: AudioMode::Exclusive,
+            device: info.device,
+            sample_rate: info.sample_rate,
+            period_frames: info.period_frames,
+            fallback: None,
+        })
+    }
+
+    fn start_shared(bank: &SoundBank) -> anyhow::Result<Self> {
         let host = cpal::default_host();
         let device = host.default_output_device().ok_or_else(|| anyhow!("нет устройства вывода звука"))?;
         let device_name = device.description().map(|d| d.name().to_string()).unwrap_or_else(|_| "Звук".into());
@@ -106,49 +205,51 @@ impl Synth {
                 .ok_or_else(|| anyhow!("устройство «{device_name}» не поддерживает float-вывод"))?
         };
         let mut config = supported.config();
-        let mut buffer_frames = None;
+        let mut period_frames = 0;
         if let cpal::SupportedBufferSize::Range { min, max } = supported.buffer_size() {
-            let frames = PREFERRED_BUFFER.clamp(*min, *max);
-            config.buffer_size = cpal::BufferSize::Fixed(frames);
-            buffer_frames = Some(frames);
+            period_frames = PREFERRED_BUFFER.clamp(*min, *max);
+            config.buffer_size = cpal::BufferSize::Fixed(period_frames);
         }
         let channels = config.channels as usize;
         let sample_rate = config.sample_rate;
 
-        let mut settings = SynthesizerSettings::new(sample_rate as i32);
-        settings.block_size = SYNTH_BLOCK;
-        let mut synth = Synthesizer::new(&bank.font, &settings).map_err(|e| anyhow!("синтезатор: {e:?}"))?;
-
-        let (tx, mut rx) = RingBuffer::<MidiMsg>::new(4096);
-        let failed = Arc::new(AtomicBool::new(false));
-        let failed_cb = failed.clone();
-        let mut left = vec![0f32; 4096];
-        let mut right = vec![0f32; 4096];
+        let (tx, rx) = RingBuffer::<MidiMsg>::new(4096);
+        let mut core = SynthCore::new(&bank.font, sample_rate, rx)?;
+        let shared = Arc::new(AudioShared::default());
+        let cb_shared = shared.clone();
+        let err_shared = shared.clone();
 
         let stream = device.build_output_stream(
             config,
-            move |out: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                while let Ok(m) = rx.pop() {
-                    let [status, d1, d2] = m.bytes;
-                    synth.process_midi_message((status & 0x0F) as i32, (status & 0xF0) as i32, d1 as i32, d2 as i32);
-                }
+            move |out: &mut [f32], info: &cpal::OutputCallbackInfo| {
                 let frames = out.len() / channels;
-                if left.len() < frames {
-                    left.resize(frames, 0.0);
-                    right.resize(frames, 0.0);
-                }
-                synth.render(&mut left[..frames], &mut right[..frames]);
+                // Задержка вывода: от колбэка до ЦАП плюс сам буфер
+                let ts = info.timestamp();
+                let ahead = ts.playback.duration_since(ts.callback).as_secs_f64();
+                let buffer = frames as f64 / sample_rate as f64;
+                cb_shared.output_latency_us.store(((ahead + buffer) * 1e6) as u32, Ordering::Relaxed);
+
+                let (left, right) = core.render(frames);
                 for (i, frame) in out.chunks_mut(channels).enumerate() {
                     for (c, s) in frame.iter_mut().enumerate() {
                         *s = if c % 2 == 0 { left[i] } else { right[i] };
                     }
                 }
             },
-            move |_| failed_cb.store(true, Ordering::Relaxed),
+            move |_| err_shared.failed.store(true, Ordering::Relaxed),
             None,
         )?;
         stream.play()?;
-        Ok(Self { _stream: stream, tx, failed, device: device_name, buffer_frames, sample_rate })
+        Ok(Self {
+            _backend: Backend::Shared(stream),
+            tx,
+            shared,
+            mode: AudioMode::Shared,
+            device: device_name,
+            sample_rate,
+            period_frames,
+            fallback: None,
+        })
     }
 
     pub fn send(&mut self, msg: MidiMsg) {
@@ -157,6 +258,17 @@ impl Synth {
 
     /// Поток звука сломался (например, устройство отключили) — нужно пересоздать.
     pub fn failed(&self) -> bool {
-        self.failed.load(Ordering::Relaxed)
+        self.shared.failed.load(Ordering::Relaxed)
+    }
+
+    /// Оценка задержки от синтеза до ЦАП, мс.
+    pub fn output_latency_ms(&self) -> Option<f32> {
+        let us = self.shared.output_latency_us.load(Ordering::Relaxed);
+        (us > 0).then_some(us as f32 / 1000.0)
+    }
+
+    /// Период вывода, мс. В среднем нота ждёт ближайшего аудиоблока половину периода.
+    pub fn period_ms(&self) -> f32 {
+        self.period_frames as f32 * 1000.0 / self.sample_rate.max(1) as f32
     }
 }

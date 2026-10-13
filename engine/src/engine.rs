@@ -10,8 +10,8 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-use crate::audio::{PresetInfo, SoundBank, Synth};
-use crate::input::{GamepadInput, PadInfo, RawEvent};
+use crate::audio::{AudioMode, PresetInfo, SoundBank, Synth};
+use crate::input::{self, GamepadInput, PadInfo, RawEvent};
 use crate::mapper::{ControlView, InputEvent, Mapper, Output};
 use crate::midi::{self, MidiMsg, Recorder};
 use crate::midi_out::MidiOut;
@@ -40,6 +40,7 @@ pub enum PadChoice {
 #[serde(default)]
 pub struct Settings {
     pub synth_enabled: bool,
+    pub audio_mode: AudioMode,
     pub midi_out: Option<String>,
     pub soundfont: Option<PathBuf>,
     pub pad: PadChoice,
@@ -48,7 +49,14 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { synth_enabled: true, midi_out: None, soundfont: None, pad: PadChoice::Auto, profile: None }
+        Self {
+            synth_enabled: true,
+            audio_mode: AudioMode::default(),
+            midi_out: None,
+            soundfont: None,
+            pad: PadChoice::Auto,
+            profile: None,
+        }
     }
 }
 
@@ -63,6 +71,7 @@ pub struct EngineConfig {
 pub enum Command {
     SetPadChoice(PadChoice),
     SetSynthEnabled(bool),
+    SetAudioMode(AudioMode),
     SetMidiOut(Option<String>),
     LoadProfile(Box<Profile>),
     ToggleRecord,
@@ -83,9 +92,25 @@ pub struct SynthStatus {
     pub enabled: bool,
     pub soundfont: Option<String>,
     pub device: Option<String>,
-    /// Задержка буфера вывода, мс.
-    pub buffer_ms: Option<f32>,
+    /// Какой режим выбран и какой реально работает (может откатиться на общий).
+    pub requested_mode: AudioMode,
+    pub mode: Option<AudioMode>,
+    /// Почему не включился эксклюзивный режим.
+    pub fallback: Option<String>,
     pub error: Option<String>,
+    pub latency: Option<Latency>,
+}
+
+/// Оценка задержки «нажал → услышал», мс. Время передачи самого геймпада сюда не входит.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct Latency {
+    /// От получения нажатия системой до его обработки движком (среднее по последним).
+    pub input: Option<f32>,
+    /// Ожидание ближайшего аудиоблока: в среднем полпериода.
+    pub block: f32,
+    /// От синтеза до динамиков.
+    pub output: f32,
+    pub total: f32,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -187,6 +212,8 @@ struct Runtime {
     recorder: Option<Recorder>,
     last_recording: Option<String>,
     outputs: Vec<Output>,
+    /// Скользящее среднее задержки ввода, мс.
+    input_ms: Option<f32>,
     dirty: bool,
 }
 
@@ -208,6 +235,7 @@ impl Runtime {
             recorder: None,
             last_recording: None,
             outputs: Vec::new(),
+            input_ms: None,
             dirty: true,
             settings: config.settings,
         };
@@ -222,7 +250,9 @@ impl Runtime {
         if let Some(bank) = &rt.bank {
             rt.shared.lock().unwrap().presets = bank.presets.clone();
         }
-        rt.start_synth();
+        if rt.settings.synth_enabled {
+            rt.start_synth();
+        }
         if let Some(port) = rt.settings.midi_out.clone() {
             rt.connect_midi(&port);
         }
@@ -280,7 +310,7 @@ impl Runtime {
                     self.active = self.pick_pad();
                 }
             }
-            RawEvent::Input { pad, event } => {
+            RawEvent::Input { pad, event, t_ns } => {
                 if Some(pad) != self.active {
                     let pressed = matches!(event, InputEvent::Button { down: true, .. });
                     if self.settings.pad != PadChoice::Auto || !pressed {
@@ -288,6 +318,10 @@ impl Runtime {
                     }
                     self.mapper.release_all();
                     self.active = Some(pad);
+                }
+                if matches!(event, InputEvent::Button { down: true, .. }) {
+                    let ms = input::ticks_ns().saturating_sub(t_ns) as f32 / 1e6;
+                    self.input_ms = Some(self.input_ms.map_or(ms, |avg| avg * 0.8 + ms * 0.2));
                 }
                 self.mapper.handle(event);
                 self.flush();
@@ -322,12 +356,19 @@ impl Runtime {
                 }
             }
             Command::SetSynthEnabled(on) => {
-                if !on {
-                    self.silence_synth();
-                }
                 self.settings.synth_enabled = on;
+                // Выключенный синтезатор отпускает звуковое устройство (важно в эксклюзивном режиме)
+                self.synth = None;
+                self.synth_error = None;
                 if on {
-                    self.restore_synth_state();
+                    self.start_synth();
+                }
+            }
+            Command::SetAudioMode(mode) => {
+                self.settings.audio_mode = mode;
+                if self.settings.synth_enabled {
+                    self.synth = None;
+                    self.start_synth();
                 }
             }
             Command::SetMidiOut(port) => {
@@ -400,13 +441,6 @@ impl Runtime {
         (0..16).map(|ch| MidiMsg::cc(ch, 123, 0)).collect()
     }
 
-    fn silence_synth(&mut self) {
-        let msgs = self.all_notes_off();
-        if let Some(synth) = &mut self.synth {
-            msgs.into_iter().for_each(|m| synth.send(m));
-        }
-    }
-
     fn silence_midi_out(&mut self) {
         let msgs = self.all_notes_off();
         if let Some(out) = &mut self.midi_out {
@@ -438,7 +472,7 @@ impl Runtime {
     fn start_synth(&mut self) {
         let Some(bank) = &self.bank else { return };
         self.last_audio_try = Instant::now();
-        match Synth::start(bank) {
+        match Synth::start(bank, self.settings.audio_mode) {
             Ok(synth) => {
                 self.synth = Some(synth);
                 self.synth_error = None;
@@ -455,7 +489,11 @@ impl Runtime {
             self.synth_error = Some("Аудиоустройство отключилось, переподключаюсь…".into());
             self.dirty = true;
         }
-        if self.synth.is_none() && self.bank.is_some() && self.last_audio_try.elapsed() >= AUDIO_RETRY {
+        if self.settings.synth_enabled
+            && self.synth.is_none()
+            && self.bank.is_some()
+            && self.last_audio_try.elapsed() >= AUDIO_RETRY
+        {
             self.start_synth();
             self.dirty = true;
         }
@@ -520,11 +558,16 @@ impl Runtime {
                 enabled: self.settings.synth_enabled,
                 soundfont: self.bank.as_ref().map(|b| b.path.display().to_string()),
                 device: self.synth.as_ref().map(|s| s.device.clone()),
-                buffer_ms: self
-                    .synth
-                    .as_ref()
-                    .and_then(|s| s.buffer_frames.map(|f| f as f32 * 1000.0 / s.sample_rate as f32)),
+                requested_mode: self.settings.audio_mode,
+                mode: self.synth.as_ref().map(|s| s.mode),
+                fallback: self.synth.as_ref().and_then(|s| s.fallback.clone()),
                 error: self.synth_error.clone(),
+                latency: self.synth.as_ref().and_then(|s| {
+                    let output = s.output_latency_ms()?;
+                    let block = s.period_ms() / 2.0;
+                    let total = self.input_ms.unwrap_or(0.0) + block + output;
+                    Some(Latency { input: self.input_ms, block, output, total })
+                }),
             },
             midi: MidiStatus { port: self.midi_out.as_ref().map(|m| m.port.clone()), error: self.midi_error.clone() },
             recording: self.recorder.is_some(),

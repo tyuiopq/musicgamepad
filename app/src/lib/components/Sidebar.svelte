@@ -21,6 +21,18 @@
   const fixedName = $derived(status.pad_choice.mode === "fixed" ? status.pad_choice.name : null);
   const fixedMissing = $derived(fixedName !== null && !status.pads.some((p) => p.name === fixedName));
   const fileName = (path: string | null) => path?.split(/[\\/]/).pop() ?? null;
+
+  const latency = $derived(status.synth.latency);
+  const latencyTitle = $derived(
+    latency
+      ? [
+          latency.input !== null ? `ввод ${latency.input.toFixed(1)} мс` : "ввод — нажми кнопку",
+          `ожидание блока ${latency.block.toFixed(1)} мс`,
+          `вывод ${latency.output.toFixed(1)} мс`,
+          "без времени передачи самого геймпада",
+        ].join(" · ")
+      : "",
+  );
 </script>
 
 <nav>
@@ -89,6 +101,26 @@
       Встроенный синтезатор
     </label>
     {#if status.synth.error}<p class="error">{status.synth.error}</p>{/if}
+    {#if status.synth.enabled}
+      <label class="check" title="Эксклюзивный режим Windows: звук идёт напрямую в устройство">
+        <input
+          type="checkbox"
+          checked={status.synth.requested_mode === "exclusive"}
+          onchange={(e) => run(() => api.setAudioMode(e.currentTarget.checked ? "exclusive" : "shared"))}
+        />
+        Низкая задержка
+      </label>
+      {#if status.synth.fallback}
+        <p class="error">Не включилась: {status.synth.fallback}. Играю в обычном режиме.</p>
+      {:else if status.synth.mode === "exclusive"}
+        <p class="muted small">Другие программы на «{status.synth.device}» сейчас не звучат.</p>
+      {/if}
+      {#if latency}
+        <p class="latency" title={latencyTitle}>
+          Задержка ≈ <b class:good={latency.total < 15} class:bad={latency.total >= 25}>{Math.round(latency.total)} мс</b>
+        </p>
+      {/if}
+    {/if}
     <div class="row">
       <select
         aria-label="MIDI-выход"
@@ -103,7 +135,6 @@
     {#if status.midi.error}<p class="error">{status.midi.error}</p>{/if}
     <p class="muted small" title={status.synth.soundfont ?? ""}>
       {fileName(status.synth.soundfont) ?? "банк не найден"}
-      {#if status.synth.buffer_ms}· буфер {status.synth.buffer_ms.toFixed(0)} мс{/if}
     </p>
   </section>
 
@@ -217,6 +248,20 @@
   }
   .spacer {
     flex: 1;
+  }
+  .latency {
+    margin: 0;
+    font-size: 14px;
+    color: var(--muted);
+  }
+  .latency b {
+    color: var(--text);
+  }
+  .latency b.good {
+    color: var(--face-a);
+  }
+  .latency b.bad {
+    color: var(--error);
   }
   .link {
     background: none;
