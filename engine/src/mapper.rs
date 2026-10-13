@@ -2,6 +2,8 @@
 
 use std::collections::{BTreeSet, HashMap};
 
+use serde::Serialize;
+
 use crate::midi::{self, MidiMsg};
 use crate::model::*;
 
@@ -10,6 +12,25 @@ use crate::model::*;
 pub enum InputEvent {
     Button { button: Button, down: bool },
     Axis { axis: Axis, value: f32 },
+}
+
+/// Что делает вход сейчас (см. `Mapper::preview`).
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct ControlView {
+    pub input: Input,
+    /// Слой, из которого взято назначение.
+    pub layer: String,
+    #[serde(flatten)]
+    pub role: Role,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(tag = "role", rename_all = "snake_case")]
+pub enum Role {
+    Note { notes: Vec<u8>, chord: bool },
+    Modifier { effect: ModEffect, latch: Latch, active: bool },
+    Command { command: Command },
+    Control { target: ControlTarget },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -185,6 +206,47 @@ impl Mapper {
         let mut v: Vec<SwitchKey> = self.held.keys().copied().collect();
         v.extend(self.latched.iter().map(|(k, _)| *k));
         v
+    }
+
+    /// Что сделает каждый назначенный вход прямо сейчас, с учётом слоёв и модификаторов.
+    /// По этому интерфейс подписывает кнопки на схеме геймпада.
+    pub fn preview(&self) -> Vec<ControlView> {
+        let pressed = self.pressed();
+        let mut seen: Vec<Result<SwitchKey, Axis>> = Vec::new();
+        let mut views = Vec::new();
+        for li in self.active_layer_indices().into_iter().rev() {
+            let layer = &self.profile.layers[li];
+            for b in &layer.bindings {
+                let key = match b.input {
+                    Input::Axis { axis } => Err(axis),
+                    other => Ok(other.switch_key().expect("кнопочный вход")),
+                };
+                if seen.contains(&key) {
+                    continue;
+                }
+                seen.push(key);
+                let role = match &b.action {
+                    Action::Note { note, .. } => Role::Note {
+                        notes: self.notes_for(*note),
+                        chord: matches!(note, NoteSpec::Chord { .. }),
+                    },
+                    Action::Modifier { effect, latch } => Role::Modifier {
+                        effect: effect.clone(),
+                        latch: *latch,
+                        active: key.is_ok_and(|k| pressed.contains(&k)),
+                    },
+                    Action::Command { command } => Role::Command { command: command.clone() },
+                    Action::Control { target, .. } => Role::Control { target: *target },
+                };
+                views.push(ControlView { input: b.input, layer: layer.id.clone(), role });
+            }
+        }
+        views
+    }
+
+    /// Текущие положения осей.
+    pub fn axis_values(&self) -> HashMap<Axis, f32> {
+        self.axis_values.clone()
     }
 
     /// Текущий сдвиг в полутонах от модификаторов.
@@ -656,6 +718,29 @@ mod tests {
         assert!(msgs.contains(&MidiMsg::cc(0, 123, 0)));
         assert!(m.sounding_notes().is_empty());
         assert_eq!(m.active_layers().len(), 1);
+    }
+
+    #[test]
+    fn preview_follows_modifiers_and_layers() {
+        let mut m = fresh();
+        let south = |m: &Mapper| {
+            m.preview().into_iter().find(|v| v.input == Input::Button { button: Button::South }).unwrap()
+        };
+        assert_eq!(south(&m).role, Role::Note { notes: vec![69], chord: false });
+        btn(&mut m, Button::LeftShoulder, true);
+        assert_eq!(south(&m).role, Role::Note { notes: vec![57], chord: false });
+        let lb = m.preview().into_iter().find(|v| v.input == Input::Button { button: Button::LeftShoulder }).unwrap();
+        assert!(matches!(lb.role, Role::Modifier { active: true, .. }));
+        btn(&mut m, Button::LeftShoulder, false);
+        btn(&mut m, Button::LeftStick, true);
+        let v = south(&m);
+        assert_eq!(v.layer, "chords");
+        assert_eq!(v.role, Role::Note { notes: vec![69, 72, 76], chord: true });
+        // назначения из нижнего слоя видны, если верхний их не перекрывает
+        assert!(m.preview().iter().any(|v| v.input == Input::Axis { axis: Axis::RightX }));
+        let json = serde_json::to_value(v).unwrap();
+        assert_eq!(json["role"], "note");
+        assert_eq!(json["input"]["button"], "south");
     }
 
     #[test]

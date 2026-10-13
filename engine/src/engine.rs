@@ -1,6 +1,7 @@
 //! Поток движка: геймпад → раскладка → синтезатор / MIDI-порт / запись.
 //! Интерфейс общается с ним командами, а состояние получает снимками `Status`.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -11,10 +12,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::audio::{PresetInfo, SoundBank, Synth};
 use crate::input::{GamepadInput, PadInfo, RawEvent};
-use crate::mapper::{InputEvent, Mapper, Output};
+use crate::mapper::{ControlView, InputEvent, Mapper, Output};
 use crate::midi::{self, MidiMsg, Recorder};
 use crate::midi_out::MidiOut;
-use crate::model::{Profile, SwitchKey};
+use crate::model::{Axis, Music, Profile, SwitchKey};
 
 /// Сколько ждать событий геймпада за один оборот цикла. Нажатия будят поток сразу,
 /// это лишь верхняя граница реакции на команды из интерфейса.
@@ -100,7 +101,12 @@ pub struct Status {
     pub pad_choice: PadChoice,
     pub input_error: Option<String>,
     pub profile: String,
+    pub music: Option<Music>,
     pub layers: Vec<String>,
+    /// Что делает каждый назначенный вход прямо сейчас.
+    pub controls: Vec<ControlView>,
+    /// Положения стиков и курков.
+    pub axes: HashMap<Axis, f32>,
     pub transpose: i32,
     pub notes: Vec<u8>,
     pub pressed: Vec<SwitchKey>,
@@ -502,6 +508,9 @@ impl Runtime {
             pad_choice: self.settings.pad.clone(),
             input_error: self.input_error.clone(),
             profile: profile.name.clone(),
+            music: Some(profile.music.clone()),
+            controls: self.mapper.preview(),
+            axes: self.mapper.axis_values(),
             layers: self.mapper.active_layers().iter().map(|l| l.name.clone()).collect(),
             transpose: self.mapper.transpose(),
             notes: self.mapper.sounding_notes(),
