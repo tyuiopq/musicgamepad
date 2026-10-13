@@ -1,0 +1,15 @@
+[package]
+name = "spike"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+cpal = "0.18"
+midir = "0.11"
+rtrb = "0.4.0"
+rustysynth = "1.3"
+sdl3 = { version = "0.20", features = ["build-from-source-static"] }
+
+# Исходники SDL лежат в проекте: C-сборка SDL ломается на кириллице в пути к ~/.cargo
+[patch.crates-io]
+sdl3-src = { path = "../vendor/sdl3-src" }
