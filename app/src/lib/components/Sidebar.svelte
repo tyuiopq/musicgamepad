@@ -9,12 +9,18 @@
     ports,
     run,
     refreshPorts,
+    view,
+    onview,
+    editorDirty,
   }: {
     status: Status;
     profiles: ProfileEntry[];
     ports: string[];
     run: (action: () => Promise<unknown>) => void;
     refreshPorts: () => Promise<void>;
+    view: "play" | "edit";
+    onview: (v: "play" | "edit") => void;
+    editorDirty: boolean;
   } = $props();
 
   const auto = $derived(status.pad_choice.mode === "auto");
@@ -37,6 +43,15 @@
 
 <nav>
   <div class="logo">MusicGamepad</div>
+
+  <div class="views" role="tablist" aria-label="Экран">
+    <button type="button" role="tab" aria-selected={view === "play"} class:on={view === "play"} onclick={() => onview("play")}>
+      Игра
+    </button>
+    <button type="button" role="tab" aria-selected={view === "edit"} class:on={view === "edit"} onclick={() => onview("edit")}>
+      Раскладка{#if editorDirty}<span class="dirty" title="Есть несохранённые изменения">•</span>{/if}
+    </button>
+  </div>
 
   <section>
     <div class="section-title">Геймпад</div>
@@ -80,9 +95,14 @@
 
   <section>
     <div class="section-title">Профиль</div>
-    <select value={status.profile} onchange={(e) => run(() => api.selectProfile(e.currentTarget.value))}>
+    <select
+      value={status.profile}
+      disabled={editorDirty}
+      title={editorDirty ? "Сначала сохрани или отмени правки в раскладке" : ""}
+      onchange={(e) => run(() => api.selectProfile(e.currentTarget.value))}
+    >
       {#each profiles as p (p.name)}
-        <option value={p.name}>{p.name}</option>
+        <option value={p.name}>{p.name}{p.modified ? " (изменён)" : ""}</option>
       {/each}
     </select>
     {#if status.music}
@@ -162,6 +182,30 @@
     display: flex;
     flex-direction: column;
     gap: 24px;
+  }
+  .views {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+    padding: 4px;
+    border-radius: 12px;
+    background: var(--bg);
+    margin-top: -8px;
+  }
+  .views button {
+    min-height: 36px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--muted);
+  }
+  .views button.on {
+    background: var(--key);
+    color: var(--text);
+  }
+  .views .dirty {
+    color: var(--accent);
+    margin-left: 4px;
   }
   .logo {
     font-family: var(--font-display);

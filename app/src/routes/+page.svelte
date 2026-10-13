@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { api, type PadFamily, type Profile, type ProfileEntry, type Status } from "$lib/api";
+  import { api, demoOption, type PadFamily, type Profile, type ProfileEntry, type Status } from "$lib/api";
+  import Editor from "$lib/components/editor/Editor.svelte";
   import Gamepad from "$lib/components/Gamepad.svelte";
   import PianoRoll from "$lib/components/PianoRoll.svelte";
   import Sidebar from "$lib/components/Sidebar.svelte";
@@ -12,6 +13,12 @@
   let profiles = $state<ProfileEntry[]>([]);
   let ports = $state<string[]>([]);
   let error = $state<string | null>(null);
+  let view = $state<"play" | "edit">(demoOption("view") === "edit" ? "edit" : "play");
+  let editorDirty = $state(false);
+
+  async function refreshProfiles() {
+    profiles = await api.profiles();
+  }
 
   const activePad = $derived(status?.pads.find((p) => p.id === status?.active_pad) ?? null);
   const family = $derived<PadFamily>(activePad?.family ?? "xbox");
@@ -51,7 +58,7 @@
   onMount(() => {
     const unlisten = api.onStatus((s) => (status = s));
     api.status().then((s) => (status ??= s));
-    api.profiles().then((p) => (profiles = p));
+    refreshProfiles();
     refreshPorts();
     return () => {
       unlisten.then((f) => f());
@@ -63,9 +70,14 @@
   <p class="loading muted">Запускаю движок…</p>
 {:else}
   <div class="app">
-    <Sidebar {status} {profiles} {ports} {run} {refreshPorts} />
+    <Sidebar {status} {profiles} {ports} {run} {refreshPorts} {view} onview={(v) => (view = v)} {editorDirty} />
 
     <main>
+      <!-- Редактор не уничтожается при уходе с экрана, иначе потерялись бы несохранённые правки -->
+      <div class="view" hidden={view !== "edit"}>
+        <Editor {status} {family} {profiles} onprofiles={refreshProfiles} ondirty={(d) => (editorDirty = d)} />
+      </div>
+      {#if view === "play"}
       <header>
         <div class="now" aria-live="polite">
           {#if status.notes.length === 0}
@@ -96,7 +108,7 @@
         {#if status.pads.length === 0}
           <p class="muted empty">Геймпад не подключён. Ниже — раскладка профиля «{status.profile}».</p>
         {/if}
-        <Gamepad {status} {family} {profile} />
+        <Gamepad controls={status.controls} pressed={status.pressed} axes={status.axes} {family} {profile} />
       </section>
 
       <section class="roll">
@@ -106,11 +118,15 @@
         </div>
         <PianoRoll notes={status.notes} {tonic} />
       </section>
+      {/if}
     </main>
   </div>
 {/if}
 
 <style>
+  .view[hidden] {
+    display: none;
+  }
   .loading {
     padding: 24px;
   }

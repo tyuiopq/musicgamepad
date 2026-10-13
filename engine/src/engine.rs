@@ -15,7 +15,7 @@ use crate::input::{self, GamepadInput, PadInfo, RawEvent};
 use crate::mapper::{ControlView, InputEvent, Mapper, Output};
 use crate::midi::{self, MidiMsg, Recorder};
 use crate::midi_out::MidiOut;
-use crate::model::{Axis, Music, Profile, SwitchKey};
+use crate::model::{Axis, Direction, Music, Profile, SwitchKey};
 
 /// Сколько ждать событий геймпада за один оборот цикла. Нажатия будят поток сразу,
 /// это лишь верхняя граница реакции на команды из интерфейса.
@@ -140,7 +140,20 @@ pub struct Status {
     pub midi: MidiStatus,
     pub recording: bool,
     pub last_recording: Option<String>,
+    pub touched: Option<Touched>,
 }
+
+/// Последний контрол, которого коснулись на геймпаде (для «назначить с геймпада»).
+/// `seq` растёт с каждым касанием, так интерфейс отличает новое касание от старого.
+#[derive(Clone, Debug, Serialize)]
+pub struct Touched {
+    pub key: SwitchKey,
+    pub seq: u64,
+}
+
+/// Отклонение оси, которое считается касанием, и порог, ниже которого ось «отпущена».
+const TOUCH_ON: f32 = 0.6;
+const TOUCH_OFF: f32 = 0.3;
 
 /// Данные, которые поток движка публикует для интерфейса.
 #[derive(Default)]
@@ -214,6 +227,9 @@ struct Runtime {
     outputs: Vec<Output>,
     /// Скользящее среднее задержки ввода, мс.
     input_ms: Option<f32>,
+    touched: Option<Touched>,
+    /// Какие направления осей сейчас отклонены за порог касания.
+    axis_touch: Vec<(Axis, Direction)>,
     dirty: bool,
 }
 
@@ -236,6 +252,8 @@ impl Runtime {
             last_recording: None,
             outputs: Vec::new(),
             input_ms: None,
+            touched: None,
+            axis_touch: Vec::new(),
             dirty: true,
             settings: config.settings,
         };
@@ -319,6 +337,7 @@ impl Runtime {
                     self.mapper.release_all();
                     self.active = Some(pad);
                 }
+                self.track_touch(event);
                 if matches!(event, InputEvent::Button { down: true, .. }) {
                     let ms = input::ticks_ns().saturating_sub(t_ns) as f32 / 1e6;
                     self.input_ms = Some(self.input_ms.map_or(ms, |avg| avg * 0.8 + ms * 0.2));
@@ -326,6 +345,35 @@ impl Runtime {
                 self.mapper.handle(event);
                 self.flush();
             }
+        }
+    }
+
+    fn track_touch(&mut self, event: InputEvent) {
+        let key = match event {
+            InputEvent::Button { button, down: true } => Some(SwitchKey::Button { button }),
+            InputEvent::Button { .. } => None,
+            InputEvent::Axis { axis, value } => {
+                let mut hit = None;
+                for direction in [Direction::Positive, Direction::Negative] {
+                    let amount = if direction == Direction::Positive { value } else { -value };
+                    let pos = self.axis_touch.iter().position(|t| *t == (axis, direction));
+                    match pos {
+                        None if amount >= TOUCH_ON => {
+                            self.axis_touch.push((axis, direction));
+                            hit = Some(SwitchKey::AxisSwitch { axis, direction });
+                        }
+                        Some(i) if amount < TOUCH_OFF => {
+                            self.axis_touch.remove(i);
+                        }
+                        _ => {}
+                    }
+                }
+                hit
+            }
+        };
+        if let Some(key) = key {
+            let seq = self.touched.as_ref().map_or(1, |t| t.seq + 1);
+            self.touched = Some(Touched { key, seq });
         }
     }
 
@@ -572,6 +620,7 @@ impl Runtime {
             midi: MidiStatus { port: self.midi_out.as_ref().map(|m| m.port.clone()), error: self.midi_error.clone() },
             recording: self.recorder.is_some(),
             last_recording: self.last_recording.clone(),
+            touched: self.touched.clone(),
         }
     }
 }

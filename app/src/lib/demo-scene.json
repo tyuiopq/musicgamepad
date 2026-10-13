@@ -3,6 +3,240 @@
     "right_trigger": 0.6200000047683716,
     "right_x": 0.44999998807907104
   },
+  "chords": [
+    {
+      "chord": true,
+      "input": {
+        "button": "dpad_left",
+        "kind": "button"
+      },
+      "layer": "chords",
+      "notes": [
+        48,
+        52,
+        55
+      ],
+      "role": "note"
+    },
+    {
+      "chord": true,
+      "input": {
+        "button": "dpad_down",
+        "kind": "button"
+      },
+      "layer": "chords",
+      "notes": [
+        50,
+        53,
+        57
+      ],
+      "role": "note"
+    },
+    {
+      "chord": true,
+      "input": {
+        "button": "dpad_right",
+        "kind": "button"
+      },
+      "layer": "chords",
+      "notes": [
+        52,
+        55,
+        59
+      ],
+      "role": "note"
+    },
+    {
+      "chord": true,
+      "input": {
+        "button": "dpad_up",
+        "kind": "button"
+      },
+      "layer": "chords",
+      "notes": [
+        53,
+        57,
+        60
+      ],
+      "role": "note"
+    },
+    {
+      "chord": true,
+      "input": {
+        "button": "west",
+        "kind": "button"
+      },
+      "layer": "chords",
+      "notes": [
+        55,
+        59,
+        62
+      ],
+      "role": "note"
+    },
+    {
+      "chord": true,
+      "input": {
+        "button": "south",
+        "kind": "button"
+      },
+      "layer": "chords",
+      "notes": [
+        57,
+        60,
+        64
+      ],
+      "role": "note"
+    },
+    {
+      "chord": true,
+      "input": {
+        "button": "east",
+        "kind": "button"
+      },
+      "layer": "chords",
+      "notes": [
+        59,
+        62,
+        65
+      ],
+      "role": "note"
+    },
+    {
+      "chord": true,
+      "input": {
+        "button": "north",
+        "kind": "button"
+      },
+      "layer": "chords",
+      "notes": [
+        60,
+        64,
+        67
+      ],
+      "role": "note"
+    },
+    {
+      "active": true,
+      "effect": {
+        "octaves": -1,
+        "type": "octaves"
+      },
+      "input": {
+        "button": "left_shoulder",
+        "kind": "button"
+      },
+      "latch": "hold",
+      "layer": "base",
+      "role": "modifier"
+    },
+    {
+      "active": false,
+      "effect": {
+        "octaves": 1,
+        "type": "octaves"
+      },
+      "input": {
+        "button": "right_shoulder",
+        "kind": "button"
+      },
+      "latch": "hold",
+      "layer": "base",
+      "role": "modifier"
+    },
+    {
+      "active": false,
+      "effect": {
+        "semitones": 1,
+        "type": "semitones"
+      },
+      "input": {
+        "axis": "left_trigger",
+        "direction": "positive",
+        "kind": "axis_switch",
+        "threshold": 0.5
+      },
+      "latch": "hold",
+      "layer": "base",
+      "role": "modifier"
+    },
+    {
+      "active": false,
+      "effect": {
+        "layer": "chords",
+        "type": "layer"
+      },
+      "input": {
+        "button": "left_stick",
+        "kind": "button"
+      },
+      "latch": "toggle",
+      "layer": "base",
+      "role": "modifier"
+    },
+    {
+      "command": {
+        "part": 0,
+        "type": "next_instrument"
+      },
+      "input": {
+        "button": "back",
+        "kind": "button"
+      },
+      "layer": "base",
+      "role": "command"
+    },
+    {
+      "command": {
+        "type": "toggle_record"
+      },
+      "input": {
+        "button": "start",
+        "kind": "button"
+      },
+      "layer": "base",
+      "role": "command"
+    },
+    {
+      "input": {
+        "axis": "right_trigger",
+        "kind": "axis"
+      },
+      "layer": "base",
+      "role": "control",
+      "target": {
+        "cc": 11,
+        "max": 127,
+        "min": 40,
+        "type": "cc"
+      }
+    },
+    {
+      "input": {
+        "axis": "right_x",
+        "kind": "axis"
+      },
+      "layer": "base",
+      "role": "control",
+      "target": {
+        "type": "pitch_bend"
+      }
+    },
+    {
+      "input": {
+        "axis": "right_y",
+        "kind": "axis"
+      },
+      "layer": "base",
+      "role": "control",
+      "target": {
+        "cc": 1,
+        "max": 127,
+        "min": 0,
+        "type": "cc"
+      }
+    }
+  ],
   "controls": [
     {
       "chord": false,
@@ -234,12 +468,451 @@
   ],
   "pressed": [
     {
-      "button": "south",
+      "button": "left_shoulder",
       "kind": "button"
     },
     {
-      "button": "left_shoulder",
+      "button": "south",
       "kind": "button"
     }
-  ]
+  ],
+  "profile": {
+    "layers": [
+      {
+        "bindings": [
+          {
+            "action": {
+              "kind": "note",
+              "note": {
+                "degree": 0,
+                "type": "degree"
+              },
+              "part": 0,
+              "velocity": 100
+            },
+            "input": {
+              "button": "dpad_left",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "kind": "note",
+              "note": {
+                "degree": 1,
+                "type": "degree"
+              },
+              "part": 0,
+              "velocity": 100
+            },
+            "input": {
+              "button": "dpad_down",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "kind": "note",
+              "note": {
+                "degree": 2,
+                "type": "degree"
+              },
+              "part": 0,
+              "velocity": 100
+            },
+            "input": {
+              "button": "dpad_right",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "kind": "note",
+              "note": {
+                "degree": 3,
+                "type": "degree"
+              },
+              "part": 0,
+              "velocity": 100
+            },
+            "input": {
+              "button": "dpad_up",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "kind": "note",
+              "note": {
+                "degree": 4,
+                "type": "degree"
+              },
+              "part": 0,
+              "velocity": 100
+            },
+            "input": {
+              "button": "west",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "kind": "note",
+              "note": {
+                "degree": 5,
+                "type": "degree"
+              },
+              "part": 0,
+              "velocity": 100
+            },
+            "input": {
+              "button": "south",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "kind": "note",
+              "note": {
+                "degree": 6,
+                "type": "degree"
+              },
+              "part": 0,
+              "velocity": 100
+            },
+            "input": {
+              "button": "east",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "kind": "note",
+              "note": {
+                "degree": 7,
+                "type": "degree"
+              },
+              "part": 0,
+              "velocity": 100
+            },
+            "input": {
+              "button": "north",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "effect": {
+                "octaves": -1,
+                "type": "octaves"
+              },
+              "kind": "modifier",
+              "latch": "hold"
+            },
+            "input": {
+              "button": "left_shoulder",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "effect": {
+                "octaves": 1,
+                "type": "octaves"
+              },
+              "kind": "modifier",
+              "latch": "hold"
+            },
+            "input": {
+              "button": "right_shoulder",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "effect": {
+                "semitones": 1,
+                "type": "semitones"
+              },
+              "kind": "modifier",
+              "latch": "hold"
+            },
+            "input": {
+              "axis": "left_trigger",
+              "direction": "positive",
+              "kind": "axis_switch",
+              "threshold": 0.5
+            }
+          },
+          {
+            "action": {
+              "effect": {
+                "layer": "chords",
+                "type": "layer"
+              },
+              "kind": "modifier",
+              "latch": "toggle"
+            },
+            "input": {
+              "button": "left_stick",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "command": {
+                "part": 0,
+                "type": "next_instrument"
+              },
+              "kind": "command"
+            },
+            "input": {
+              "button": "back",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "command": {
+                "type": "toggle_record"
+              },
+              "kind": "command"
+            },
+            "input": {
+              "button": "start",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "kind": "control",
+              "part": 0,
+              "shape": {
+                "curve": 1.0,
+                "deadzone": 0.019999999552965164,
+                "invert": false,
+                "mode": "positive"
+              },
+              "target": {
+                "cc": 11,
+                "max": 127,
+                "min": 40,
+                "type": "cc"
+              }
+            },
+            "input": {
+              "axis": "right_trigger",
+              "kind": "axis"
+            }
+          },
+          {
+            "action": {
+              "kind": "control",
+              "part": 0,
+              "shape": {
+                "curve": 1.0,
+                "deadzone": 0.15000000596046448,
+                "invert": false,
+                "mode": "bipolar"
+              },
+              "target": {
+                "type": "pitch_bend"
+              }
+            },
+            "input": {
+              "axis": "right_x",
+              "kind": "axis"
+            }
+          },
+          {
+            "action": {
+              "kind": "control",
+              "part": 0,
+              "shape": {
+                "curve": 1.0,
+                "deadzone": 0.15000000596046448,
+                "invert": false,
+                "mode": "absolute"
+              },
+              "target": {
+                "cc": 1,
+                "max": 127,
+                "min": 0,
+                "type": "cc"
+              }
+            },
+            "input": {
+              "axis": "right_y",
+              "kind": "axis"
+            }
+          }
+        ],
+        "id": "base",
+        "name": "Основной"
+      },
+      {
+        "bindings": [
+          {
+            "action": {
+              "kind": "note",
+              "note": {
+                "chord": "triad",
+                "degree": 0,
+                "type": "chord"
+              },
+              "part": 0,
+              "velocity": 90
+            },
+            "input": {
+              "button": "dpad_left",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "kind": "note",
+              "note": {
+                "chord": "triad",
+                "degree": 1,
+                "type": "chord"
+              },
+              "part": 0,
+              "velocity": 90
+            },
+            "input": {
+              "button": "dpad_down",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "kind": "note",
+              "note": {
+                "chord": "triad",
+                "degree": 2,
+                "type": "chord"
+              },
+              "part": 0,
+              "velocity": 90
+            },
+            "input": {
+              "button": "dpad_right",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "kind": "note",
+              "note": {
+                "chord": "triad",
+                "degree": 3,
+                "type": "chord"
+              },
+              "part": 0,
+              "velocity": 90
+            },
+            "input": {
+              "button": "dpad_up",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "kind": "note",
+              "note": {
+                "chord": "triad",
+                "degree": 4,
+                "type": "chord"
+              },
+              "part": 0,
+              "velocity": 90
+            },
+            "input": {
+              "button": "west",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "kind": "note",
+              "note": {
+                "chord": "triad",
+                "degree": 5,
+                "type": "chord"
+              },
+              "part": 0,
+              "velocity": 90
+            },
+            "input": {
+              "button": "south",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "kind": "note",
+              "note": {
+                "chord": "triad",
+                "degree": 6,
+                "type": "chord"
+              },
+              "part": 0,
+              "velocity": 90
+            },
+            "input": {
+              "button": "east",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "kind": "note",
+              "note": {
+                "chord": "triad",
+                "degree": 7,
+                "type": "chord"
+              },
+              "part": 0,
+              "velocity": 90
+            },
+            "input": {
+              "button": "north",
+              "kind": "button"
+            }
+          }
+        ],
+        "id": "chords",
+        "name": "Аккорды"
+      }
+    ],
+    "music": {
+      "octave": 4,
+      "root": 0,
+      "scale": {
+        "preset": "major",
+        "type": "preset"
+      }
+    },
+    "name": "Классика",
+    "parts": [
+      {
+        "bank": 0,
+        "bend_range": 2,
+        "channel": 0,
+        "instruments": [
+          0,
+          11,
+          24,
+          40,
+          56,
+          73,
+          79,
+          80
+        ],
+        "name": "Мелодия",
+        "program": 0,
+        "volume": 100
+      }
+    ]
+  }
 }

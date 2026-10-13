@@ -101,3 +101,46 @@ mod tests {
         assert_eq!(back, p);
     }
 }
+
+/// Профиль в том виде, в каком его пишет редактор интерфейса (app/src/lib/profileEdit.ts).
+#[cfg(test)]
+mod editor_json {
+    use crate::model::Profile;
+
+    #[test]
+    fn editor_output_is_accepted() {
+        let json = r#"{
+          "name": "Из редактора",
+          "music": { "root": 9, "octave": 3, "scale": { "type": "preset", "preset": "minor_pentatonic" } },
+          "parts": [{ "name": "Мелодия", "channel": 0, "program": 0, "bank": 0, "volume": 100, "bend_range": 2, "instruments": [0, 40] }],
+          "layers": [
+            { "id": "base", "name": "Основной", "bindings": [
+              { "input": { "kind": "button", "button": "south" },
+                "action": { "kind": "note", "note": { "type": "degree", "degree": 0 }, "part": 0, "velocity": 100 } },
+              { "input": { "kind": "button", "button": "east" },
+                "action": { "kind": "note", "note": { "type": "absolute", "note": 36 }, "part": 0, "velocity": 127 } },
+              { "input": { "kind": "button", "button": "west" },
+                "action": { "kind": "note", "note": { "type": "chord", "degree": 2, "chord": "seventh" }, "part": 0, "velocity": 90 } },
+              { "input": { "kind": "button", "button": "north" },
+                "action": { "kind": "modifier", "effect": { "type": "layer", "layer": "layer1" }, "latch": "toggle" } },
+              { "input": { "kind": "axis_switch", "axis": "left_trigger", "direction": "positive", "threshold": 0.35 },
+                "action": { "kind": "modifier", "effect": { "type": "sustain" }, "latch": "hold" } },
+              { "input": { "kind": "axis_switch", "axis": "left_y", "direction": "negative", "threshold": 0.5 },
+                "action": { "kind": "command", "command": { "type": "toggle_record" } } },
+              { "input": { "kind": "axis", "axis": "right_trigger" },
+                "action": { "kind": "control", "target": { "type": "velocity", "min": 30, "max": 127 },
+                            "shape": { "deadzone": 0.02, "curve": 1.4, "invert": false, "mode": "positive" }, "part": 0 } },
+              { "input": { "kind": "axis", "axis": "left_x" },
+                "action": { "kind": "control", "target": { "type": "cc", "cc": 74, "min": 0, "max": 127 },
+                            "shape": { "deadzone": 0.15, "curve": 1, "invert": true, "mode": "bipolar" }, "part": 0 } }
+            ] },
+            { "id": "layer1", "name": "Слой 1", "bindings": [
+              { "input": { "kind": "button", "button": "south" },
+                "action": { "kind": "modifier", "effect": { "type": "velocity", "velocity": 60 }, "latch": "hold" } }
+            ] }
+          ]
+        }"#;
+        let p = Profile::from_json(json).expect("профиль из редактора должен приниматься");
+        assert_eq!(p.layers[0].bindings.len(), 8);
+    }
+}

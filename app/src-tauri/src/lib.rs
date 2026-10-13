@@ -1,26 +1,26 @@
 //! Оболочка Tauri: команды для интерфейса, настройки и профили на диске.
 
-use std::path::{Path, PathBuf};
+mod profiles;
+
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 use engine::audio::PresetInfo;
+use engine::mapper::{ControlView, Mapper};
 use engine::model::Profile;
 use engine::{presets, AudioMode, Command, Engine, EngineConfig, PadChoice, Settings, Status};
-use serde::Serialize;
+use profiles::{validated, ProfileEntry, ProfileStore};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
-
-struct Paths {
-    settings: PathBuf,
-    profiles: PathBuf,
-    recordings: PathBuf,
-}
 
 struct AppState {
     engine: Engine,
     settings: Mutex<Settings>,
+    /// Профиль, который сейчас играет (может быть несохранённым черновиком редактора).
     profile: Mutex<Profile>,
-    paths: Paths,
+    profiles: ProfileStore,
+    settings_path: PathBuf,
+    recordings: PathBuf,
 }
 
 type CmdResult<T> = Result<T, String>;
@@ -30,42 +30,17 @@ impl AppState {
         let mut s = self.settings.lock().unwrap();
         f(&mut s);
         if let Ok(json) = serde_json::to_string_pretty(&*s) {
-            let _ = std::fs::write(&self.paths.settings, json);
+            let _ = std::fs::write(&self.settings_path, json);
         }
     }
-}
 
-// ---------- профили ----------
-
-#[derive(Serialize)]
-struct ProfileEntry {
-    name: String,
-    builtin: bool,
-}
-
-fn builtin_profiles() -> Vec<Profile> {
-    vec![presets::classic()]
-}
-
-fn user_profiles(dir: &Path) -> Vec<Profile> {
-    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
-    let mut v: Vec<Profile> = entries
-        .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
-        .filter_map(|e| std::fs::read_to_string(e.path()).ok())
-        .filter_map(|s| Profile::from_json(&s).ok())
-        .collect();
-    v.sort_by(|a, b| a.name.cmp(&b.name));
-    v
-}
-
-fn find_profile(dir: &Path, name: &str) -> Option<Profile> {
-    user_profiles(dir).into_iter().chain(builtin_profiles()).find(|p| p.name == name)
-}
-
-fn file_name_for(name: &str) -> String {
-    let safe: String = name.chars().map(|c| if r#"<>:"/\|?*"#.contains(c) || c.is_control() { '_' } else { c }).collect();
-    format!("{}.json", safe.trim())
+    /// Сделать профиль текущим: играть им и запомнить выбор.
+    fn activate(&self, profile: Profile) {
+        let name = profile.name.clone();
+        *self.profile.lock().unwrap() = profile.clone();
+        self.update_settings(|s| s.profile = Some(name));
+        self.engine.send(Command::LoadProfile(Box::new(profile)));
+    }
 }
 
 // ---------- команды ----------
@@ -116,14 +91,7 @@ fn set_midi_out(state: State<AppState>, port: Option<String>) {
 
 #[tauri::command]
 fn list_profiles(state: State<AppState>) -> Vec<ProfileEntry> {
-    let user = user_profiles(&state.paths.profiles);
-    let mut v: Vec<ProfileEntry> = builtin_profiles()
-        .into_iter()
-        .filter(|b| !user.iter().any(|u| u.name == b.name))
-        .map(|p| ProfileEntry { name: p.name, builtin: true })
-        .collect();
-    v.extend(user.into_iter().map(|p| ProfileEntry { name: p.name, builtin: false }));
-    v
+    state.profiles.list()
 }
 
 #[tauri::command]
@@ -133,26 +101,48 @@ fn get_profile(state: State<AppState>) -> Profile {
 
 #[tauri::command]
 fn select_profile(state: State<AppState>, name: String) -> CmdResult<()> {
-    let profile = find_profile(&state.paths.profiles, &name).ok_or(format!("профиль «{name}» не найден"))?;
+    let profile = state.profiles.find(&name).ok_or(format!("профиль «{name}» не найден"))?;
+    state.activate(profile);
+    Ok(())
+}
+
+/// Что делает каждая кнопка в слое `layer` профиля — для схемы в редакторе.
+#[tauri::command]
+fn preview_profile(profile: Profile, layer: String) -> CmdResult<Vec<ControlView>> {
+    validated(&profile)?;
+    Mapper::new(profile).preview_layer(&layer).ok_or(format!("слой «{layer}» не найден"))
+}
+
+/// Играть с профилем, не сохраняя его (правки в редакторе слышны сразу).
+#[tauri::command]
+fn apply_profile(state: State<AppState>, profile: Profile) -> CmdResult<()> {
+    validated(&profile)?;
     *state.profile.lock().unwrap() = profile.clone();
-    state.update_settings(|s| s.profile = Some(name));
     state.engine.send(Command::LoadProfile(Box::new(profile)));
     Ok(())
 }
 
-/// Сохраняет профиль в папку пользователя и, если он текущий, сразу применяет.
+/// Сохраняет профиль и делает его текущим. `previous` — имя, под которым он был сохранён.
 #[tauri::command]
-fn save_profile(state: State<AppState>, profile: Profile) -> CmdResult<()> {
-    profile.validate().map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(&state.paths.profiles).map_err(|e| e.to_string())?;
-    let path = state.paths.profiles.join(file_name_for(&profile.name));
-    std::fs::write(&path, profile.to_json()).map_err(|e| e.to_string())?;
-    let mut current = state.profile.lock().unwrap();
-    if current.name == profile.name {
-        *current = profile.clone();
-        state.engine.send(Command::LoadProfile(Box::new(profile)));
-    }
+fn save_profile(state: State<AppState>, profile: Profile, previous: Option<String>) -> CmdResult<()> {
+    state.profiles.save(&profile, previous.as_deref())?;
+    state.activate(profile);
     Ok(())
+}
+
+/// Удаляет профиль пользователя (для изменённого встроенного — возвращает заводской).
+/// Если он был текущим, текущим становится встроенный с тем же именем или «Классика».
+#[tauri::command]
+fn delete_profile(state: State<AppState>, name: String) -> CmdResult<String> {
+    state.profiles.delete(&name)?;
+    let current = state.profile.lock().unwrap().name.clone();
+    if current == name {
+        let next = state.profiles.find(&name).unwrap_or_else(presets::classic);
+        let next_name = next.name.clone();
+        state.activate(next);
+        return Ok(next_name);
+    }
+    Ok(current)
 }
 
 #[tauri::command]
@@ -167,7 +157,7 @@ fn panic(state: State<AppState>) {
 
 #[tauri::command]
 fn open_recordings(app: AppHandle, state: State<AppState>) -> CmdResult<()> {
-    let dir = &state.paths.recordings;
+    let dir = &state.recordings;
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     app.opener().open_path(dir.to_string_lossy(), None::<&str>).map_err(|e| e.to_string())
 }
@@ -180,17 +170,14 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let data_dir = path.app_data_dir()?;
     let recordings = path.document_dir().map(|d| d.join("MusicGamepad")).unwrap_or_else(|_| data_dir.join("recordings"));
     std::fs::create_dir_all(&config_dir)?;
-    let paths = Paths { settings: config_dir.join("settings.json"), profiles: data_dir.join("profiles"), recordings };
+    let settings_path = config_dir.join("settings.json");
+    let profiles = ProfileStore::new(data_dir.join("profiles"));
 
-    let settings: Settings = std::fs::read_to_string(&paths.settings)
+    let settings: Settings = std::fs::read_to_string(&settings_path)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
-    let profile = settings
-        .profile
-        .as_deref()
-        .and_then(|name| find_profile(&paths.profiles, name))
-        .unwrap_or_else(presets::classic);
+    let profile = settings.profile.as_deref().and_then(|name| profiles.find(name)).unwrap_or_else(presets::classic);
 
     let handle = app.handle().clone();
     let engine = Engine::start(
@@ -198,13 +185,20 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             profile: profile.clone(),
             settings: settings.clone(),
             soundfont_dirs: vec![data_dir.join("sounds")],
-            recordings_dir: paths.recordings.clone(),
+            recordings_dir: recordings.clone(),
         },
         move |status| {
             let _ = handle.emit("status", status);
         },
     );
-    app.manage(AppState { engine, settings: Mutex::new(settings), profile: Mutex::new(profile), paths });
+    app.manage(AppState {
+        engine,
+        settings: Mutex::new(settings),
+        profile: Mutex::new(profile),
+        profiles,
+        settings_path,
+        recordings,
+    });
     Ok(())
 }
 
@@ -225,7 +219,10 @@ pub fn run() {
             list_profiles,
             get_profile,
             select_profile,
+            preview_profile,
+            apply_profile,
             save_profile,
+            delete_profile,
             toggle_record,
             panic,
             open_recordings,

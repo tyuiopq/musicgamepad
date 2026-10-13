@@ -37,6 +37,7 @@ function baseStatus(): Status {
     midi: { port: null, error: null },
     recording: false,
     last_recording: "C:\\Users\\me\\Documents\\MusicGamepad\\melody_2026-10-13_15-02-11.mid",
+    touched: null,
   };
 }
 
@@ -63,20 +64,16 @@ if (typeof window !== "undefined" && new URLSearchParams(location.search).has("p
   setInterval(tick, 850);
 }
 
-const profile = {
-  name: "Классика",
-  music: scene.music,
-  layers: [
-    { id: "base", name: "Основной" },
-    { id: "chords", name: "Аккорды" },
-  ],
-} as Profile;
+const profile = scene.profile as Profile;
 
 export const demo: Record<string, (args?: Record<string, unknown>) => unknown> = {
   get_status: () => structuredClone(status),
   get_profile: () => profile,
-  list_profiles: (): ProfileEntry[] => [{ name: "Классика", builtin: true }],
+  list_profiles: (): ProfileEntry[] => [{ name: "Классика", builtin: true, modified: false }],
   list_midi_ports: () => ["loopMIDI Port", "Microsoft GS Wavetable Synth"],
+  preview_profile: (args) => (args?.layer === "chords" ? scene.chords : scene.controls),
+  apply_profile: () => undefined,
+  save_profile: () => undefined,
   toggle_record: () => {
     status = { ...status, recording: !status.recording };
     emit();

@@ -17,6 +17,8 @@ fn main() {
         "notes": m.sounding_notes(),
         "axes": m.axis_values(),
         "music": m.profile().music,
+        "profile": m.profile(),
+        "chords": m.preview_layer("chords"),
     });
     println!("{}", serde_json::to_string_pretty(&out).unwrap());
 }

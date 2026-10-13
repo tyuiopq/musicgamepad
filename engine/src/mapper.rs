@@ -211,10 +211,26 @@ impl Mapper {
     /// Что сделает каждый назначенный вход прямо сейчас, с учётом слоёв и модификаторов.
     /// По этому интерфейс подписывает кнопки на схеме геймпада.
     pub fn preview(&self) -> Vec<ControlView> {
+        self.preview_layers(&self.active_layer_indices())
+    }
+
+    /// То же для редактора: слой `layer` поверх базового, без модификаторов.
+    /// Назначения, пришедшие из базового слоя, помечены его id.
+    pub fn preview_layer(&self, layer: &str) -> Option<Vec<ControlView>> {
+        let i = *self.layer_ids.get(layer)?;
+        let mut layers = vec![0];
+        if i != 0 {
+            layers.push(i);
+        }
+        Some(self.preview_layers(&layers))
+    }
+
+    /// `layers` — по возрастанию, верхний перекрывает нижние.
+    fn preview_layers(&self, layers: &[usize]) -> Vec<ControlView> {
         let pressed = self.pressed();
         let mut seen: Vec<Result<SwitchKey, Axis>> = Vec::new();
         let mut views = Vec::new();
-        for li in self.active_layer_indices().into_iter().rev() {
+        for &li in layers.iter().rev() {
             let layer = &self.profile.layers[li];
             for b in &layer.bindings {
                 let key = match b.input {
@@ -741,6 +757,18 @@ mod tests {
         let json = serde_json::to_value(v).unwrap();
         assert_eq!(json["role"], "note");
         assert_eq!(json["input"]["button"], "south");
+    }
+
+    #[test]
+    fn preview_layer_for_editor() {
+        let m = fresh();
+        let chords = m.preview_layer("chords").unwrap();
+        let south = chords.iter().find(|v| v.input == Input::Button { button: Button::South }).unwrap();
+        assert_eq!(south.layer, "chords");
+        // назначения базового слоя видны как унаследованные
+        let lb = chords.iter().find(|v| v.input == Input::Button { button: Button::LeftShoulder }).unwrap();
+        assert_eq!(lb.layer, "base");
+        assert!(m.preview_layer("nope").is_none());
     }
 
     #[test]

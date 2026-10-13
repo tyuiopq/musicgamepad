@@ -1,20 +1,44 @@
 <script lang="ts">
   // Схема геймпада: на каждой кнопке — что она делает прямо сейчас.
-  import type { ControlView, Input, PadFamily, Profile, Status, SwitchKey } from "$lib/api";
+  // В редакторе (`onselect` задан) контролы кликабельны, выбранный подсвечен,
+  // а назначения, унаследованные из базового слоя, приглушены.
+  import type { ControlView, Input, PadFamily, Profile, SwitchKey } from "$lib/api";
+  import { EXTRA_BUTTONS, sameControl, type ControlId } from "$lib/controls";
   import { roleLabel, sameInput, sameKey } from "$lib/describe";
   import { keyLabel } from "$lib/labels";
 
-  let { status, family, profile }: { status: Status; family: PadFamily; profile: Profile | null } = $props();
+  let {
+    controls,
+    pressed,
+    axes,
+    family,
+    profile,
+    selected = null,
+    onselect,
+    focusLayer = null,
+  }: {
+    controls: ControlView[];
+    pressed: SwitchKey[];
+    axes: Partial<Record<string, number>>;
+    family: PadFamily;
+    profile: Profile | null;
+    selected?: ControlId | null;
+    onselect?: (c: ControlId) => void;
+    /** Слой, который редактируется: назначения из других слоёв показываются приглушённо. */
+    focusLayer?: string | null;
+  } = $props();
 
   const W = 640;
   const H = 460;
   let width = $state(W);
   const scale = $derived(Math.min(1, width / W));
+  const editable = $derived(!!onselect);
+  const tag = $derived(editable ? "button" : "div");
 
   const btn = (button: string): Input => ({ kind: "button", button });
 
   function view(input: Input): ControlView | undefined {
-    return status.controls.find((v) => sameInput(v.input, input));
+    return controls.find((v) => sameInput(v.input, input));
   }
 
   function keyOf(input: Input): SwitchKey | null {
@@ -26,15 +50,15 @@
   function isPressed(input: Input): boolean {
     const k = keyOf(input);
     if (!k) return false;
-    return status.pressed.some((p) => sameKey(p, k));
+    return pressed.some((p) => sameKey(p, k));
   }
 
   /** Состояние кнопки для стиля: звучит / модификатор включён / нажата / покой. */
   function stateOf(input: Input): "note" | "mod" | "pressed" | "idle" {
     const v = view(input);
-    const pressed = isPressed(input);
-    if (v?.role === "modifier" && (v.active || pressed)) return "mod";
-    if (pressed) return v?.role === "note" ? "note" : "pressed";
+    const down = isPressed(input);
+    if (v?.role === "modifier" && (v.active || down)) return "mod";
+    if (down) return v?.role === "note" ? "note" : "pressed";
     return "idle";
   }
 
@@ -43,16 +67,30 @@
     return v ? roleLabel(v, profile) : "";
   }
 
+  /** Назначение пришло не из редактируемого слоя. */
+  function inherited(...inputs: Input[]): boolean {
+    if (!focusLayer || focusLayer === "base") return false;
+    const views = inputs.map(view).filter((v) => v !== undefined);
+    return views.length > 0 && views.every((v) => v.layer !== focusLayer);
+  }
+
+  function pick(c: ControlId) {
+    onselect?.(c);
+  }
+
   // ---------- курки ----------
   function triggerInfo(axis: "left_trigger" | "right_trigger") {
     const sw: Input = { kind: "axis_switch", axis, direction: "positive", threshold: 0 };
     const ax: Input = { kind: "axis", axis };
     const main = view(sw) ? sw : ax;
+    const id: ControlId = { kind: "trigger", axis };
     return {
+      id,
       glyph: keyLabel({ kind: "axis_switch", axis, direction: "positive" }, family),
       label: label(main),
       state: stateOf(sw),
-      value: status.axes[axis] ?? 0,
+      value: axes[axis] ?? 0,
+      inherited: inherited(sw, ax),
     };
   }
   const lt = $derived(triggerInfo("left_trigger"));
@@ -67,23 +105,29 @@
     const ly = label({ kind: "axis", axis: y });
     if (lx) parts.push(`↔ ${lx}`);
     if (ly) parts.push(`↕ ${ly}`);
+    const switches: Input[] = [];
     for (const [axis, dir, arrow] of [
       [y, "positive", "↑"],
       [y, "negative", "↓"],
       [x, "negative", "←"],
       [x, "positive", "→"],
     ] as const) {
-      const l = label({ kind: "axis_switch", axis, direction: dir, threshold: 0 });
+      const input: Input = { kind: "axis_switch", axis, direction: dir, threshold: 0 };
+      switches.push(input);
+      const l = label(input);
       if (l) parts.push(`${arrow} ${l}`);
     }
     const click = btn(`${side}_stick`);
+    const id: ControlId = { kind: "stick", side };
     return {
+      id,
       glyph: keyLabel({ kind: "button", button: `${side}_stick` }, family),
       move: parts.join(" · "),
       click: label(click),
       clickState: stateOf(click),
-      x: status.axes[x] ?? 0,
-      y: status.axes[y] ?? 0,
+      x: axes[x] ?? 0,
+      y: axes[y] ?? 0,
+      inherited: inherited(click, { kind: "axis", axis: x }, { kind: "axis", axis: y }, ...switches),
     };
   }
   const ls = $derived(stickInfo("left"));
@@ -110,56 +154,85 @@
     nintendo: { north: "var(--muted)", west: "var(--muted)", east: "var(--muted)", south: "var(--muted)" },
   };
 
-  // Назначенные входы, которых нет на схеме, — списком под ней
-  const DRAWN = new Set([
-    ...DPAD.map((d) => d.button),
-    ...FACE.map((f) => f.button),
-    "left_shoulder",
-    "right_shoulder",
-    "back",
-    "start",
-    "left_stick",
-    "right_stick",
-  ]);
+  // Кнопки вне схемы: при игре — только назначенные, в редакторе — все
   const extras = $derived(
-    status.controls.filter((v) => v.input.kind === "button" && !DRAWN.has(v.input.button)),
+    editable
+      ? EXTRA_BUTTONS
+      : EXTRA_BUTTONS.filter((b) => controls.some((v) => sameInput(v.input, btn(b)))),
   );
+
+  const isSel = (c: ControlId) => sameControl(selected, c);
+  const buttonId = (button: string): ControlId => ({ kind: "button", button });
 </script>
 
-{#snippet face(input: Input, glyph: string, x: number, y: number, round: boolean, glyphColor?: string)}
+{#snippet face(button: string, x: number, y: number, round: boolean, glyphColor?: string)}
+  {@const input = btn(button)}
   {@const st = stateOf(input)}
   {@const v = view(input)}
-  <div
+  {@const glyph = keyLabel({ kind: "button", button }, family)}
+  <svelte:element
+    this={tag}
+    type={editable ? "button" : undefined}
+    role={editable ? "button" : undefined}
     class="cell {st}"
     class:round
     class:unbound={!v}
+    class:selected={isSel(buttonId(button))}
+    class:inherited={inherited(input)}
     style="left: {x}px; top: {y}px"
     title={v ? `${glyph}: ${label(input)}` : `${glyph}: не назначено`}
+    onclick={() => pick(buttonId(button))}
   >
     <small style={glyphColor && st === "idle" ? `color: ${glyphColor}` : ""}>{glyph}</small>
     <b class:long={label(input).length > 4}>{label(input) || "·"}</b>
-  </div>
+  </svelte:element>
 {/snippet}
 
 {#snippet bumper(button: string, side: "left" | "right")}
   {@const input = btn(button)}
-  <div class="bumper {stateOf(input)} {side}">
+  <svelte:element
+    this={tag}
+    type={editable ? "button" : undefined}
+    role={editable ? "button" : undefined}
+    class="bumper {stateOf(input)} {side}"
+    class:selected={isSel(buttonId(button))}
+    class:inherited={inherited(input)}
+    onclick={() => pick(buttonId(button))}
+  >
     <b>{keyLabel({ kind: "button", button }, family)}</b><span>{label(input) || "—"}</span>
-  </div>
+  </svelte:element>
 {/snippet}
 
 {#snippet trigger(t: ReturnType<typeof triggerInfo>, side: "left" | "right")}
-  <div class="trigger {t.state} {side}">
+  <svelte:element
+    this={tag}
+    type={editable ? "button" : undefined}
+    role={editable ? "button" : undefined}
+    class="trigger {t.state} {side}"
+    class:selected={isSel(t.id)}
+    class:inherited={t.inherited}
+    onclick={() => pick(t.id)}
+  >
     <div class="fill" style="width: {Math.round(t.value * 100)}%"></div>
     <b>{t.glyph}</b><span>{t.label || "—"}</span>
-  </div>
+  </svelte:element>
 {/snippet}
 
 {#snippet stick(s: ReturnType<typeof stickInfo>, left: number)}
-  <div class="stick {s.clickState}" style="left: {left}px">
+  <svelte:element
+    this={tag}
+    type={editable ? "button" : undefined}
+    role={editable ? "button" : undefined}
+    class="stick {s.clickState}"
+    class:selected={isSel(s.id)}
+    class:inherited={s.inherited}
+    style="left: {left}px"
+    aria-label={s.glyph}
+    onclick={() => pick(s.id)}
+  >
     <span class="glyph">{s.glyph}</span>
     <div class="dot" style="left: {42 + s.x * 28 - 8}px; top: {42 - s.y * 28 - 8}px"></div>
-  </div>
+  </svelte:element>
   <div class="stick-label" style="left: {left + 42 - 110}px">
     {#if s.move}<div>{s.move}</div>{/if}
     {#if s.click}<div class="click">нажатие — {s.click}</div>{/if}
@@ -176,23 +249,32 @@
 
     <div class="group" style="left: 92px; top: 128px">
       {#each DPAD as d (d.button)}
-        {@render face(btn(d.button), keyLabel({ kind: "button", button: d.button }, family), d.x, d.y, false)}
+        {@render face(d.button, d.x, d.y, false)}
       {/each}
     </div>
 
     <div class="group" style="left: 374px; top: 116px">
       {#each FACE as f (f.button)}
-        {@render face(btn(f.button), keyLabel({ kind: "button", button: f.button }, family), f.x, f.y, true, FACE_COLORS[family][f.button])}
+        {@render face(f.button, f.x, f.y, true, FACE_COLORS[family][f.button])}
       {/each}
     </div>
 
     <div class="center">
       {#each ["back", "start"] as b (b)}
         {@const input = btn(b)}
-        <div class="small {stateOf(input)}" title={keyLabel({ kind: "button", button: b }, family)}>
+        <svelte:element
+          this={tag}
+          type={editable ? "button" : undefined}
+          role={editable ? "button" : undefined}
+          class="small {stateOf(input)}"
+          class:selected={isSel(buttonId(b))}
+          class:inherited={inherited(input)}
+          title={keyLabel({ kind: "button", button: b }, family)}
+          onclick={() => pick(buttonId(b))}
+        >
           <div class="pill"></div>
           <small>{label(input) || keyLabel({ kind: "button", button: b }, family)}</small>
-        </div>
+        </svelte:element>
       {/each}
     </div>
 
@@ -203,13 +285,20 @@
 
 {#if extras.length}
   <div class="extras">
-    {#each extras as v (JSON.stringify(v.input))}
-      {#if v.input.kind === "button"}
-        <span class="chip">
-          <b>{keyLabel({ kind: "button", button: v.input.button }, family)}</b>
-          {roleLabel(v, profile)}
-        </span>
-      {/if}
+    {#each extras as b (b)}
+      {@const input = btn(b)}
+      <svelte:element
+        this={tag}
+        type={editable ? "button" : undefined}
+        role={editable ? "button" : undefined}
+        class="chip {stateOf(input)}"
+        class:selected={isSel(buttonId(b))}
+        class:inherited={inherited(input)}
+        onclick={() => pick(buttonId(b))}
+      >
+        <b>{keyLabel({ kind: "button", button: b }, family)}</b>
+        {label(input) || "—"}
+      </svelte:element>
     {/each}
   </div>
 {/if}
@@ -437,5 +526,36 @@
   }
   .extras b {
     color: var(--muted);
+  }
+
+  /* ---------- редактор ---------- */
+  button.cell,
+  button.bumper,
+  button.trigger,
+  button.stick,
+  button.small,
+  button.chip {
+    font: inherit;
+    color: inherit;
+    padding: 0;
+    cursor: pointer;
+  }
+  button.cell,
+  button.small {
+    border: none;
+  }
+  button.chip {
+    padding: 4px 12px;
+    background: transparent;
+  }
+  button:hover {
+    filter: brightness(1.25);
+  }
+  .selected {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+  }
+  .inherited {
+    opacity: 0.45;
   }
 </style>
