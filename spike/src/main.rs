@@ -69,11 +69,11 @@ fn degree_of(button: Button) -> Option<usize> {
 }
 
 fn soundfont_path() -> PathBuf {
-    let local = PathBuf::from("assets/GeneralUser-GS.sf2");
+    let local = PathBuf::from("../assets/GeneralUser-GS.sf2");
     if local.exists() {
         local
     } else {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/GeneralUser-GS.sf2")
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../assets/GeneralUser-GS.sf2")
     }
 }
 

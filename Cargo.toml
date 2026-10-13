@@ -1,0 +1,18 @@
+[workspace]
+resolver = "3"
+members = ["engine", "app/src-tauri"]
+exclude = ["spike", "vendor/sdl3-src"]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+
+# Исходники SDL лежат в проекте: C-сборка SDL ломается на кириллице в пути к ~/.cargo
+[patch.crates-io]
+sdl3-src = { path = "vendor/sdl3-src" }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+strip = true

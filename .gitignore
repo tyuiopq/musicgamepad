@@ -2,3 +2,4 @@ target/
 node_modules/
 # Звуковые банки большие — не храним в git, источник указан в assets/README.md
 *.sf2
+.cargo/config.toml
