@@ -33,7 +33,8 @@
 ```
 cd app
 pnpm tauri dev                  # разработка, с горячей перезагрузкой интерфейса
-pnpm tauri build --no-bundle    # релиз: target/release/musicgamepad.exe
+pnpm tauri build --no-bundle    # только exe: target/release/musicgamepad.exe
+pnpm tauri build                # установщик: target/release/bundle/nsis/MusicGamepad_*_x64-setup.exe
 ```
 
 Тесты ядра и запуск движка без окна:
@@ -48,3 +49,15 @@ cargo run -p engine --example headless --release -- 30   # 30 секунд пе�
 - Настройки: `%APPDATA%\com.musicgamepad.app\settings.json`
 - Свои профили: `%APPDATA%\com.musicgamepad.app\profiles\*.json`
 - Записи: `Документы\MusicGamepad\`
+
+## Поставка
+
+Установщик (NSIS, на русском, без прав администратора) не содержит звуковой банк: при первом
+запуске программа предлагает скачать GeneralUser GS (32 МБ) или выбрать свой `.sf2`. Банк из
+`assets/` подхватывается только отладочной сборкой.
+
+Иконка — `app/src-tauri/installer/icon.svg`; после правки: отрендерить в PNG 1024×1024 и
+`pnpm tauri icon src-tauri/installer/icon-1024.png`. Картинки установщика — `installer/*.bmp`.
+
+Журнал ошибок: `%APPDATA%\com.musicgamepad.app\logs\musicgamepad.log`
+(кнопка-значок в шапке «Настроек» открывает папку).
