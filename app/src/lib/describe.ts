@@ -88,6 +88,8 @@ export function roleLabel(v: ControlView, profile: Profile | null): string {
           return "отмена слоя";
         case "loop_clear":
           return "очистить луп";
+        case "tap_tempo":
+          return "тап темпа";
       }
       break;
     case "control":

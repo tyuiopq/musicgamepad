@@ -12,6 +12,7 @@
     profile,
     family,
     axes,
+    sounding = [],
     presets,
     midiPort,
     onchange,
@@ -22,6 +23,8 @@
     profile: Profile;
     family: PadFamily;
     axes: Partial<Record<string, number>>;
+    /** Звучащие сейчас ноты — для записи аккорда с геймпада. */
+    sounding?: number[];
     presets: PresetInfo[];
     midiPort: string | null;
     onchange: (slotInput: Binding["input"], b: Binding | null) => void;
@@ -57,6 +60,7 @@
       inheritedLayer={base.name}
       {profile}
       axisValue={axis ? (axes[axis] ?? 0) : 0}
+      {sounding}
       {presets}
       {midiPort}
       onchange={(b) => onchange(slot.input, b)}

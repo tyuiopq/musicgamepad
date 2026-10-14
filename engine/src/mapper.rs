@@ -47,6 +47,8 @@ pub enum Output {
 /// Гистерезис «кнопки» на оси: при пороге 0.5 нажатие — от 0.55, отпускание — ниже 0.45.
 /// Без этого курок у порога дребезжит.
 const SWITCH_HYSTERESIS: f32 = 0.05;
+/// Отклонение, с которого ось считается «тронутой» для силы нажатия от последней оси.
+const LAST_AXIS_TOUCH: f32 = 0.15;
 /// Подхват засчитывается, если стик подошёл к прежнему значению ближе этого (из 127).
 const PICKUP_WINDOW: i32 = 2;
 /// Минимальный шаг подтяжки, который стоит отправлять (из 16384).
@@ -113,6 +115,10 @@ pub struct Mapper {
     rates: HashMap<Axis, f32>,
     rel_values: HashMap<ControlKey, f32>,
     dyn_velocity: Option<u8>,
+    /// Ноты фиксированной длины: сколько ещё звучать (с) и что выключить.
+    timed: Vec<(f32, Vec<(u8, u8)>)>,
+    /// Ось, которую тронули последней (для силы нажатия «от последней оси»).
+    last_axis: Option<Axis>,
     sustain: bool,
     out: Vec<Output>,
 }
@@ -137,6 +143,8 @@ impl Mapper {
             rates: HashMap::new(),
             rel_values: HashMap::new(),
             dyn_velocity: None,
+            timed: Vec::new(),
+            last_axis: None,
             sustain: false,
             out: Vec::new(),
         };
@@ -172,6 +180,9 @@ impl Mapper {
             }
             InputEvent::Axis { axis, value } => {
                 self.axis_values.insert(axis, value);
+                if value.abs() >= LAST_AXIS_TOUCH {
+                    self.last_axis = Some(axis);
+                }
                 for direction in [Direction::Positive, Direction::Negative] {
                     let key = SwitchKey::AxisSwitch { axis, direction };
                     let amount = match direction {
@@ -220,6 +231,7 @@ impl Mapper {
         for (ch, cc, off) in ccs {
             self.send_cc(ch, cc, off);
         }
+        self.timed.clear();
         self.sounding.clear();
         for ch in self.channels() {
             self.emit(MidiMsg::cc(ch, 123, 0));
@@ -231,6 +243,21 @@ impl Mapper {
     /// Ход времени: сглаживание и относительные контроллеры. Вызывать часто (каждые несколько мс).
     pub fn tick(&mut self, dt: Duration) {
         let dt_s = dt.as_secs_f32();
+        if !self.timed.is_empty() {
+            let mut done = Vec::new();
+            self.timed.retain_mut(|(left, notes)| {
+                *left -= dt_s;
+                if *left <= 0.0 {
+                    done.append(notes);
+                    false
+                } else {
+                    true
+                }
+            });
+            for (ch, n) in done {
+                self.note_off_counted(ch, n);
+            }
+        }
         let routes: Vec<(Axis, Route)> = self.routes.iter().map(|(a, r)| (*a, *r)).collect();
         for (axis, route) in routes {
             let Action::Control { target, shape, part, relative, .. } = self.binding(route).action.clone() else { continue };
@@ -259,7 +286,7 @@ impl Mapper {
 
     /// Нужен ли `tick` прямо сейчас: идёт сглаживание или относительный контроллер отклонён.
     pub fn needs_tick(&self) -> bool {
-        self.smooth.values().any(|(cur, goal)| cur != goal) || self.rates.values().any(|r| *r != 0.0)
+        !self.timed.is_empty() || self.smooth.values().any(|(cur, goal)| cur != goal) || self.rates.values().any(|r| *r != 0.0)
     }
 
     /// Суммарный сдвиг от модификаторов, полутоны и ступени — для показа в интерфейсе.
@@ -334,7 +361,7 @@ impl Mapper {
                 seen.push(key);
                 let role = match &b.action {
                     Action::Note { note, part, latch, .. } => Role::Note {
-                        notes: self.notes_for(note, *part),
+                        notes: self.notes_for(note, *part, layer.transpose),
                         chord: matches!(note, NoteSpec::Chord { .. }),
                         latch: *latch,
                         on: key.is_ok_and(|k| self.latched_notes.contains_key(&k)),
@@ -383,11 +410,13 @@ impl Mapper {
     // ---------- нажатия ----------
 
     fn press(&mut self, key: SwitchKey, threshold: f32) {
-        let action = self.resolve(key).map(|r| self.binding(r).action.clone());
+        let route = self.resolve(key);
+        let action = route.map(|r| self.binding(r).action.clone());
         let held = match action {
-            Some(Action::Note { note, part, velocity, latch }) => {
+            Some(Action::Note { note, part, velocity, latch, length_ms, velocity_from }) => {
                 // Защёлка: второе нажатие выключает то, что включило первое
                 if latch == Latch::Toggle
+                    && length_ms == 0
                     && let Some(notes) = self.latched_notes.remove(&key)
                 {
                     for (ch, n) in notes {
@@ -397,8 +426,9 @@ impl Mapper {
                     return;
                 }
                 let ch = self.profile.parts[part].channel;
-                let vel = self.velocity(velocity);
-                let notes: Vec<(u8, u8)> = self.notes_for(&note, part).into_iter().map(|n| (ch, n)).collect();
+                let vel = self.velocity(velocity, velocity_from);
+                let shift = route.map_or(0, |r| self.profile.layers[r.layer].transpose);
+                let notes: Vec<(u8, u8)> = self.notes_for(&note, part, shift).into_iter().map(|n| (ch, n)).collect();
                 for &(ch, n) in &notes {
                     let count = self.sounding.entry((ch, n)).or_insert(0);
                     *count += 1;
@@ -406,7 +436,11 @@ impl Mapper {
                         self.emit(MidiMsg::note_on(ch, n, vel));
                     }
                 }
-                if latch == Latch::Toggle {
+                if length_ms > 0 {
+                    // Нота фиксированной длины: отпускание кнопки её не выключает
+                    self.timed.push((length_ms as f32 / 1000.0, notes));
+                    Held::Nothing
+                } else if latch == Latch::Toggle {
                     self.latched_notes.insert(key, notes);
                     Held::Nothing
                 } else {
@@ -598,9 +632,10 @@ impl Mapper {
 
     // ---------- ноты ----------
 
-    fn notes_for(&self, spec: &NoteSpec, part: usize) -> Vec<u8> {
+    /// Ноты назначения; `shift` — сдвиг слоя, в котором оно лежит.
+    fn notes_for(&self, spec: &NoteSpec, part: usize, shift: i32) -> Vec<u8> {
         let (mods_semis, degrees) = self.offset();
-        let semis = mods_semis + self.profile.parts.get(part).map_or(0, |p| p.transpose);
+        let semis = mods_semis + shift + self.profile.parts.get(part).map_or(0, |p| p.transpose);
         let music = &self.profile.music;
         let raw: Vec<i32> = match spec {
             NoteSpec::Degree { degree } => vec![music.degree_note(degree + degrees)],
@@ -622,12 +657,18 @@ impl Mapper {
         notes
     }
 
-    fn velocity(&self, base: u8) -> u8 {
+    fn velocity(&self, base: u8, source: VelocitySource) -> u8 {
         let forced = self.effects().filter_map(|e| match e {
             ModEffect::Velocity { velocity } => Some(*velocity),
             _ => None,
         }).last();
-        forced.or(self.dyn_velocity).unwrap_or(base).clamp(1, 127)
+        let amount = |axis: Option<Axis>| axis.and_then(|a| self.axis_values.get(&a)).map_or(0.0, |v| v.abs());
+        let own = match source {
+            VelocitySource::Fixed => self.dyn_velocity.unwrap_or(base),
+            VelocitySource::Axis { axis, min } => lerp(min, base, amount(Some(axis))) as u8,
+            VelocitySource::LastAxis { min } => lerp(min, base, amount(self.last_axis)) as u8,
+        };
+        forced.unwrap_or(own).clamp(1, 127)
     }
 
     // ---------- плавные контроллеры ----------
@@ -868,6 +909,67 @@ mod tests {
         m.handle(InputEvent::Axis { axis, value });
     }
 
+    fn note_action(note: u8, length_ms: u32, velocity_from: VelocitySource) -> Action {
+        Action::Note { note: NoteSpec::Absolute { note }, part: 0, velocity: 120, latch: Latch::Hold, length_ms, velocity_from }
+    }
+
+    #[test]
+    fn fixed_length_note_ends_by_itself() {
+        let mut m = with(vec![bind(Button::Misc1, note_action(60, 100, VelocitySource::Fixed))]);
+        btn(&mut m, Button::Misc1, true);
+        assert_eq!(notes_on(&mut m), [60]);
+        btn(&mut m, Button::Misc1, false);
+        assert!(midi(&mut m).is_empty(), "отпускание не выключает ноту");
+        assert!(m.needs_tick());
+        m.tick(Duration::from_millis(60));
+        assert!(midi(&mut m).is_empty());
+        m.tick(Duration::from_millis(60));
+        let off = midi(&mut m);
+        assert!(off.iter().any(|x| x.is_note_off() && x.bytes[1] == 60), "через 100 мс — Note Off");
+        assert!(!m.needs_tick());
+    }
+
+    #[test]
+    fn velocity_from_axis() {
+        let mut m = with(vec![
+            bind(Button::Misc1, note_action(60, 0, VelocitySource::Axis { axis: Axis::RightTrigger, min: 20 })),
+            bind(Button::LeftPaddle1, note_action(62, 0, VelocitySource::LastAxis { min: 20 })),
+        ]);
+        let vel = |m: &mut Mapper| midi(m).into_iter().find(|x| x.status() == 0x90).map(|x| x.bytes[2]);
+        btn(&mut m, Button::Misc1, true);
+        assert_eq!(vel(&mut m), Some(20), "ось не тронута — минимум");
+        btn(&mut m, Button::Misc1, false);
+        axis(&mut m, Axis::RightTrigger, 1.0);
+        midi(&mut m);
+        btn(&mut m, Button::Misc1, true);
+        assert_eq!(vel(&mut m), Some(120), "курок до упора — максимум");
+        axis(&mut m, Axis::LeftTrigger, 0.5);
+        midi(&mut m);
+        btn(&mut m, Button::LeftPaddle1, true);
+        assert_eq!(vel(&mut m), Some(70), "последняя тронутая ось — левый курок наполовину");
+    }
+
+    #[test]
+    fn layer_transpose_shifts_its_notes() {
+        let mut p = classic();
+        p.layers.push(Layer {
+            id: "up".into(),
+            name: "Выше".into(),
+            bindings: vec![
+                bind(Button::South, note_action(60, 0, VelocitySource::Fixed)),
+                bind(Button::Misc1, Action::Modifier { effect: ModEffect::Layer { layer: "up".into() }, latch: Latch::Toggle }),
+            ],
+            combo: vec![],
+            transpose: 12,
+        });
+        p.layers[0].bindings.push(bind(Button::Misc1, Action::Modifier { effect: ModEffect::Layer { layer: "up".into() }, latch: Latch::Toggle }));
+        let mut m = Mapper::new(p);
+        midi(&mut m);
+        btn(&mut m, Button::Misc1, true);
+        btn(&mut m, Button::South, true);
+        assert_eq!(notes_on(&mut m), [72]);
+    }
+
     #[test]
     fn s_curve_is_soft_at_both_ends() {
         let s = AxisShape { deadzone: 0.0, curve: 2.0, curve_kind: CurveKind::S, mode: AxisMode::Positive, ..Default::default() };
@@ -997,6 +1099,7 @@ mod tests {
                 },
             }],
             combo: vec![],
+            transpose: 0,
         });
         p.validate().unwrap();
         p
@@ -1020,7 +1123,7 @@ mod tests {
         let mut p = classic();
         p.layers[0].bindings.push(Binding {
             input: Input::Button { button: Button::Misc1 },
-            action: Action::Note { note: NoteSpec::Absolute { note: 69 }, part: 0, velocity: 100, latch: Latch::Hold },
+            action: Action::Note { note: NoteSpec::Absolute { note: 69 }, part: 0, velocity: 100, latch: Latch::Hold, length_ms: 0, velocity_from: VelocitySource::Fixed },
         });
         let mut m = Mapper::new(p);
         m.drain();
@@ -1147,7 +1250,7 @@ mod tests {
     fn latched_note_toggles_and_survives_modifier_change() {
         let mut m = with(vec![bind(
             Button::Misc1,
-            Action::Note { note: NoteSpec::Degree { degree: 0 }, part: 0, velocity: 100, latch: Latch::Toggle },
+            Action::Note { note: NoteSpec::Degree { degree: 0 }, part: 0, velocity: 100, latch: Latch::Toggle, length_ms: 0, velocity_from: VelocitySource::Fixed },
         )]);
         btn(&mut m, Button::Misc1, true);
         btn(&mut m, Button::Misc1, false);
@@ -1162,7 +1265,7 @@ mod tests {
     #[test]
     fn panic_releases_latched_notes_and_cc() {
         let mut m = with(vec![
-            bind(Button::Misc1, Action::Note { note: NoteSpec::Absolute { note: 40 }, part: 0, velocity: 100, latch: Latch::Toggle }),
+            bind(Button::Misc1, Action::Note { note: NoteSpec::Absolute { note: 40 }, part: 0, velocity: 100, latch: Latch::Toggle, length_ms: 0, velocity_from: VelocitySource::Fixed }),
             bind(Button::LeftPaddle1, Action::Cc { cc: 80, part: 0, on: 127, off: 0, latch: Latch::Toggle, step: 0 }),
         ]);
         btn(&mut m, Button::Misc1, true);
@@ -1221,7 +1324,7 @@ mod tests {
             note: NoteSpec::Chord { degree: 0, chord, intervals, inversion, open: false, bass },
             part: 0,
             velocity: 100,
-            latch: Latch::Hold,
+            latch: Latch::Hold, length_ms: 0, velocity_from: VelocitySource::Fixed,
         };
         let mut m = with(vec![
             bind(Button::Misc1, chord(ChordKind::Triad, vec![], 1, false)),
@@ -1239,8 +1342,9 @@ mod tests {
         let lay = |id: &str, combo: Vec<String>, note: u8| Layer {
             id: id.into(),
             name: id.into(),
-            bindings: vec![bind(Button::South, Action::Note { note: NoteSpec::Absolute { note }, part: 0, velocity: 100, latch: Latch::Hold })],
+            bindings: vec![bind(Button::South, Action::Note { note: NoteSpec::Absolute { note }, part: 0, velocity: 100, latch: Latch::Hold, length_ms: 0, velocity_from: VelocitySource::Fixed })],
             combo,
+            transpose: 0,
         };
         p.layers[0].bindings.retain(|b| !matches!(b.input, Input::Button { button: Button::LeftShoulder | Button::RightShoulder }));
         for (button, layer) in [(Button::LeftShoulder, "lb"), (Button::RightShoulder, "rb")] {
@@ -1316,6 +1420,7 @@ mod tests {
                 false,
             )],
             combo: vec![],
+            transpose: 0,
         });
         p.validate().unwrap();
         let mut m = Mapper::new(p);

@@ -374,9 +374,40 @@ impl Looper {
     }
 }
 
+/// Нажатия дальше этого друг от друга — новая серия.
+const TAP_GAP: Duration = Duration::from_millis(2500);
+
+/// Tap Tempo: запомнить нажатие и, если их уже три и больше, вернуть темп по средним промежуткам.
+pub fn tap_tempo(taps: &mut Vec<Instant>, now: Instant) -> Option<f32> {
+    if taps.last().is_some_and(|&t| now.duration_since(t) > TAP_GAP) {
+        taps.clear();
+    }
+    taps.push(now);
+    if taps.len() > 5 {
+        taps.remove(0);
+    }
+    if taps.len() < 3 {
+        return None;
+    }
+    let span = now.duration_since(taps[0]).as_secs_f32() / (taps.len() - 1) as f32;
+    Some((60.0 / span).round().clamp(30.0, 300.0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tap_tempo_averages_and_restarts() {
+        let t0 = Instant::now();
+        let mut taps = Vec::new();
+        let at = |ms: u64| t0 + Duration::from_millis(ms);
+        assert_eq!(tap_tempo(&mut taps, at(0)), None);
+        assert_eq!(tap_tempo(&mut taps, at(500)), None);
+        assert_eq!(tap_tempo(&mut taps, at(1000)), Some(120.0));
+        assert_eq!(tap_tempo(&mut taps, at(1660)), Some(108.0));
+        assert_eq!(tap_tempo(&mut taps, at(9000)), None, "долгая пауза — новая серия");
+    }
 
     fn s() -> TransportSettings {
         TransportSettings { bpm: 120.0, beats_per_bar: 4, ..Default::default() }

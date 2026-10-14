@@ -403,6 +403,8 @@ struct Runtime {
     looper: Looper,
     /// Ноты, включённые петлёй и ещё не выключенные.
     loop_sounding: Vec<(u8, u8)>,
+    /// Нажатия Tap Tempo (последние несколько).
+    taps: Vec<Instant>,
     wav_tx: Sender<Result<String, String>>,
     wav_rx: Receiver<Result<String, String>>,
     exporting: usize,
@@ -466,6 +468,7 @@ impl Runtime {
             count_in_at: Instant::now(),
             looper: Looper::default(),
             loop_sounding: Vec::new(),
+            taps: Vec::new(),
             wav_tx,
             wav_rx,
             exporting: 0,
@@ -1237,6 +1240,13 @@ impl Runtime {
             Action::LoopClear => {
                 let fx = self.looper.clear();
                 self.apply_loop(fx);
+            }
+            Action::TapTempo => {
+                if let Some(bpm) = transport::tap_tempo(&mut self.taps, now) {
+                    let mut ts = self.settings.transport.clone();
+                    ts.bpm = bpm;
+                    self.set_transport(ts);
+                }
             }
             Action::Panic | Action::NextInstrument { .. } | Action::PrevInstrument { .. } | Action::SetProgram { .. } => {}
         }

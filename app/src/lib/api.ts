@@ -101,7 +101,8 @@ export type Command =
   | { type: "set_program"; part: number; program: number; bank: number }
   | { type: "loop_record" }
   | { type: "loop_undo" }
-  | { type: "loop_clear" };
+  | { type: "loop_clear" }
+  | { type: "tap_tempo" };
 
 export type Quantize = "off" | "quarter" | "eighth" | "sixteenth" | "eighth_triplet";
 
@@ -157,11 +158,23 @@ export type ControlTarget =
   | { type: "pressure"; min: number; max: number };
 
 export type Action =
-  | { kind: "note"; note: NoteSpec; part: number; velocity: number; latch: Latch }
+  | {
+      kind: "note";
+      note: NoteSpec;
+      part: number;
+      velocity: number;
+      latch: Latch;
+      /** Фиксированная длина, мс (0 / нет — пока зажата). */
+      length_ms?: number;
+      velocity_from?: VelocitySource;
+    }
   | { kind: "cc"; cc: number; part: number; on: number; off: number; latch: Latch; step: number }
   | { kind: "modifier"; effect: ModEffect; latch: Latch }
   | { kind: "command"; command: Command }
   | { kind: "control"; target: ControlTarget; shape: AxisShape; part: number; takeover: boolean; relative: boolean };
+
+/** Сила нажатия: постоянная или от оси (от `min` до `velocity`). */
+export type VelocitySource = { type: "fixed" } | { type: "axis"; axis: string; min: number } | { type: "last_axis"; min: number };
 
 export interface Binding {
   input: Input;
@@ -189,6 +202,8 @@ export interface Layer {
   bindings: Binding[];
   /** Слой-комбинация: включается, когда включены все перечисленные слои. */
   combo?: string[];
+  /** Сдвиг нот слоя, полутоны. */
+  transpose?: number;
 }
 
 /** Звучание партии: стандартные MIDI-контроллеры, 64 — «как в банке» (кроме панорамы и посылов). */

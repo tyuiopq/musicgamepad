@@ -607,6 +607,13 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                     remember_instruments(&handle, &status.profile, &programs);
                 }
                 last_programs = Some((status.profile.clone(), programs));
+                // Темп или метроном поменяли с геймпада (Tap Tempo, команда) — запоминаем
+                if let Some(state) = handle.try_state::<AppState>() {
+                    let ts = &status.transport.settings;
+                    if state.settings.lock().unwrap().transport != *ts {
+                        state.update_settings(|s| s.transport = ts.clone());
+                    }
+                }
                 let family = status
                     .active_pad
                     .and_then(|id| status.pads.iter().find(|p| p.id == id))

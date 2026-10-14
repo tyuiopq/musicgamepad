@@ -195,6 +195,7 @@
               "relative": false,
               "shape": {
                 "curve": 1.0,
+                "curve_kind": "power",
                 "deadzone": 0.019999999552965164,
                 "invert": false,
                 "mode": "positive",
@@ -219,6 +220,7 @@
               "relative": false,
               "shape": {
                 "curve": 1.0,
+                "curve_kind": "power",
                 "deadzone": 0.15000000596046448,
                 "invert": false,
                 "mode": "bipolar",
@@ -241,6 +243,7 @@
               "relative": false,
               "shape": {
                 "curve": 1.0,
+                "curve_kind": "power",
                 "deadzone": 0.15000000596046448,
                 "invert": false,
                 "mode": "absolute",
@@ -266,6 +269,7 @@
               "relative": false,
               "shape": {
                 "curve": 1.0,
+                "curve_kind": "power",
                 "deadzone": 0.15000000596046448,
                 "invert": false,
                 "mode": "bipolar",
@@ -291,6 +295,7 @@
               "relative": false,
               "shape": {
                 "curve": 1.0,
+                "curve_kind": "power",
                 "deadzone": 0.15000000596046448,
                 "invert": false,
                 "mode": "bipolar",
@@ -1106,6 +1111,14 @@
     {
       "builtin": true,
       "category": "builtin",
+      "description": "Аккомпанемент: на крестовине и кнопках — трезвучия всех ступеней лада с басом, пока зажат LT — септаккорды. LB — октава ниже, RB — педаль, RT — сила нажатия. Back — другой инструмент (фортепиано, электропиано, струнные, орган).",
+      "modified": false,
+      "name": "Аккорды",
+      "target": ""
+    },
+    {
+      "builtin": true,
+      "category": "builtin",
       "description": "Минорная пентатоника от «ля»: любая кнопка звучит «в тему» — удобно импровизировать под блюз и рок. LT — педаль, подтяжка на правом стике.",
       "modified": false,
       "name": "Импровизация: пентатоника",
@@ -1142,6 +1155,14 @@
       "modified": false,
       "name": "FL Studio: клавиши",
       "target": "FL Studio"
+    },
+    {
+      "builtin": true,
+      "category": "daw",
+      "description": "Геймпад как пульт: Play/Record/Stop, петля и метроном на кнопках, навигация по трекам и сценам на крестовине, громкость, панорама и посылы — на стиках (относительный режим, значение остаётся, где оставил), курки — две ручки. Нажатие левого стика — Tap Tempo.",
+      "modified": false,
+      "name": "Управление DAW",
+      "target": "Ableton Live, FL Studio, Reaper…"
     },
     {
       "builtin": true,
@@ -2610,11 +2631,11 @@
   ],
   "pressed": [
     {
-      "button": "left_shoulder",
+      "button": "south",
       "kind": "button"
     },
     {
-      "button": "south",
+      "button": "left_shoulder",
       "kind": "button"
     }
   ],
@@ -2840,6 +2861,7 @@
               "relative": false,
               "shape": {
                 "curve": 1.0,
+                "curve_kind": "power",
                 "deadzone": 0.019999999552965164,
                 "invert": false,
                 "mode": "positive",
@@ -2865,6 +2887,7 @@
               "relative": false,
               "shape": {
                 "curve": 1.0,
+                "curve_kind": "power",
                 "deadzone": 0.15000000596046448,
                 "invert": false,
                 "mode": "bipolar",
@@ -2887,6 +2910,7 @@
               "relative": false,
               "shape": {
                 "curve": 1.0,
+                "curve_kind": "power",
                 "deadzone": 0.15000000596046448,
                 "invert": false,
                 "mode": "absolute",

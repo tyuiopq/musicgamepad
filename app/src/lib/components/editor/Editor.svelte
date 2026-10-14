@@ -236,6 +236,14 @@
     return l.id;
   }
 
+  function shiftLayer(step: number) {
+    if (!layer) return;
+    const v = Math.max(-24, Math.min(24, (layer.transpose ?? 0) + step));
+    if (v) layer.transpose = v;
+    else delete layer.transpose;
+    changed();
+  }
+
   function copyLayer(id: string) {
     if (!draft) return;
     const l = duplicateLayer(draft, id);
@@ -488,6 +496,12 @@
                     Пока ничем не включается — назначь модификатор «Слой» в основном слое.
                   {/if}
                 </span>
+                <div class="row" style="--gap: 4px" title="Ноты этого слоя звучат выше или ниже на столько полутонов">
+                  <span class="xs muted">Сдвиг</span>
+                  <button type="button" class="btn btn-sm btn-icon" aria-label="На полутон ниже" onclick={() => shiftLayer(-1)}>−</button>
+                  <span class="shift">{(layer.transpose ?? 0) > 0 ? "+" : ""}{layer.transpose ?? 0}</span>
+                  <button type="button" class="btn btn-sm btn-icon" aria-label="На полутон выше" onclick={() => shiftLayer(1)}>+</button>
+                </div>
                 <button type="button" class="btn btn-sm btn-danger" onclick={() => removeLayer(layer.id)}>Удалить слой</button>
               </div>
               <details class="combo">
@@ -545,6 +559,7 @@
               profile={draft}
               {family}
               axes={status.axes}
+              sounding={status.notes}
               {presets}
               midiPort={status.midi.port}
               onchange={onBinding}
@@ -689,6 +704,11 @@
   }
   .center {
     text-align: center;
+  }
+  .shift {
+    min-width: 28px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
   }
   .history {
     font-size: 18px;

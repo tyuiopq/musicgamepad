@@ -7,7 +7,7 @@ fn button(button: Button) -> Input {
 }
 
 fn note(input: Input, degree: i32) -> Binding {
-    Binding { input, action: Action::Note { note: NoteSpec::Degree { degree }, part: 0, velocity: 100, latch: Latch::Hold } }
+    Binding { input, action: Action::Note { note: NoteSpec::Degree { degree }, part: 0, velocity: 100, latch: Latch::Hold, length_ms: 0, velocity_from: VelocitySource::Fixed } }
 }
 
 fn chord(input: Input, degree: i32) -> Binding {
@@ -17,7 +17,7 @@ fn chord(input: Input, degree: i32) -> Binding {
             note: NoteSpec::Chord { degree, chord: ChordKind::Triad, intervals: vec![], inversion: 0, open: false, bass: false },
             part: 0,
             velocity: 90,
-            latch: Latch::Hold,
+            latch: Latch::Hold, length_ms: 0, velocity_from: VelocitySource::Fixed,
         },
     }
 }
@@ -91,8 +91,8 @@ pub fn classic() -> Profile {
             source: PartSource::Default,
         }],
         layers: vec![
-            Layer { id: "base".into(), name: "Основной".into(), bindings: base, combo: vec![] },
-            Layer { id: "chords".into(), name: "Аккорды".into(), bindings: chords, combo: vec![] },
+            Layer { id: "base".into(), name: "Основной".into(), bindings: base, combo: vec![], transpose: 0 },
+            Layer { id: "chords".into(), name: "Аккорды".into(), bindings: chords, combo: vec![], transpose: 0 },
         ],
         meta: ProfileMeta {
             category: "builtin".into(),
@@ -106,7 +106,7 @@ pub fn classic() -> Profile {
 // ---------- библиотека профилей ----------
 
 fn absolute(input: Input, note: u8, velocity: u8) -> Binding {
-    Binding { input, action: Action::Note { note: NoteSpec::Absolute { note }, part: 0, velocity, latch: Latch::Hold } }
+    Binding { input, action: Action::Note { note: NoteSpec::Absolute { note }, part: 0, velocity, latch: Latch::Hold, length_ms: 0, velocity_from: VelocitySource::Fixed } }
 }
 
 fn control_takeover(axis: Axis, target: ControlTarget, shape: AxisShape) -> Binding {
@@ -141,7 +141,7 @@ fn part(name: &str, channel: u8, program: u8, bank: u16, instruments: Vec<u8>) -
 }
 
 fn base_layer(bindings: Vec<Binding>) -> Layer {
-    Layer { id: "base".into(), name: "Основной".into(), bindings, combo: vec![] }
+    Layer { id: "base".into(), name: "Основной".into(), bindings, combo: vec![], transpose: 0 }
 }
 
 fn step(text: &str) -> SetupStep {
@@ -256,6 +256,7 @@ fn chords_layer() -> Layer {
         name: "Аккорды".into(),
         bindings: DEGREE_BUTTONS.iter().map(|&(b, d)| chord(button(b), d)).collect(),
         combo: vec![],
+        transpose: 0,
     }
 }
 
@@ -427,9 +428,136 @@ pub fn synth_bass() -> Profile {
     }
 }
 
+fn chord_of(input: Input, degree: i32, chord: ChordKind) -> Binding {
+    Binding {
+        input,
+        action: Action::Note {
+            note: NoteSpec::Chord { degree, chord, intervals: vec![], inversion: 0, open: false, bass: true },
+            part: 0,
+            velocity: 96,
+            latch: Latch::Hold,
+            length_ms: 0,
+            velocity_from: VelocitySource::Fixed,
+        },
+    }
+}
+
+/// Аккомпанемент: аккорд на каждой кнопке, с LT — септаккорды.
+pub fn chords() -> Profile {
+    let mut base: Vec<Binding> = DEGREE_BUTTONS.iter().map(|&(b, d)| chord_of(button(b), d, ChordKind::Triad)).collect();
+    base.extend([
+        modifier(button(Button::LeftShoulder), ModEffect::Octaves { octaves: -1 }, Latch::Hold),
+        modifier(button(Button::RightShoulder), ModEffect::Sustain, Latch::Hold),
+        modifier(trigger_switch(Axis::LeftTrigger), ModEffect::Layer { layer: "sevenths".into() }, Latch::Hold),
+        control(Axis::RightTrigger, ControlTarget::Velocity { min: 45, max: 127 }, trigger(AxisMode::Positive)),
+        control(Axis::RightX, ControlTarget::PitchBend, AxisShape::default()),
+        control(Axis::RightY, ControlTarget::Cc { cc: 1, min: 0, max: 127 }, AxisShape { mode: AxisMode::Absolute, ..Default::default() }),
+        command(button(Button::Back), Command::NextInstrument { part: 0 }),
+        command(button(Button::Start), Command::ToggleRecord),
+    ]);
+    let sevenths = Layer {
+        id: "sevenths".into(),
+        name: "Септаккорды".into(),
+        bindings: DEGREE_BUTTONS.iter().map(|&(b, d)| chord_of(button(b), d, ChordKind::Seventh)).collect(),
+        combo: vec![],
+        transpose: 0,
+    };
+    Profile {
+        name: "Аккорды".into(),
+        music: Music { root: 0, octave: 4, scale: Scale::Preset { preset: ScalePreset::Major } },
+        parts: vec![part("Аккорды", 0, 0, 0, vec![0, 4, 48, 19])],
+        layers: vec![base_layer(base), sevenths],
+        meta: ProfileMeta {
+            category: "builtin".into(),
+            target: String::new(),
+            description: "Аккомпанемент: на крестовине и кнопках — трезвучия всех ступеней лада с басом, пока зажат LT — септаккорды. LB — октава ниже, RB — педаль, RT — сила нажатия. Back — другой инструмент (фортепиано, электропиано, струнные, орган).".into(),
+            setup: vec![],
+        },
+    }
+}
+
+/// Номера CC пульта DAW: свободные в стандарте MIDI (102–119 не заняты).
+const DAW_CC: [(Button, u8); 8] = [
+    (Button::South, 102),
+    (Button::East, 103),
+    (Button::West, 104),
+    (Button::North, 105),
+    (Button::DpadUp, 106),
+    (Button::DpadDown, 107),
+    (Button::DpadLeft, 108),
+    (Button::DpadRight, 109),
+];
+
+fn relative(axis: Axis, cc: u8) -> Binding {
+    Binding {
+        input: Input::Axis { axis },
+        action: Action::Control {
+            target: ControlTarget::Cc { cc, min: 0, max: 127 },
+            shape: AxisShape { deadzone: 0.2, ..Default::default() },
+            part: 0,
+            takeover: false,
+            relative: true,
+        },
+    }
+}
+
+/// Пульт для DAW: транспорт, навигация и ручки — без нот.
+pub fn daw_control() -> Profile {
+    let mut base: Vec<Binding> = DAW_CC.iter().map(|&(b, cc)| cc_button(button(b), cc, Latch::Hold)).collect();
+    base.extend([
+        cc_button(button(Button::Back), CC_PLAY, Latch::Hold),
+        cc_button(button(Button::Start), CC_RECORD, Latch::Hold),
+        cc_button(button(Button::RightStick), CC_EXTRA, Latch::Hold),
+        command(button(Button::LeftStick), Command::TapTempo),
+        relative(Axis::LeftY, 20),
+        relative(Axis::LeftX, 21),
+        relative(Axis::RightY, 22),
+        relative(Axis::RightX, 23),
+        control_takeover(Axis::LeftTrigger, ControlTarget::Cc { cc: 24, min: 0, max: 127 }, trigger(AxisMode::Positive)),
+        control_takeover(Axis::RightTrigger, ControlTarget::Cc { cc: 25, min: 0, max: 127 }, trigger(AxisMode::Positive)),
+    ]);
+    let mut setup = loopmidi_steps();
+    setup.extend([
+        step("В DAW включи у входа «loopMIDI Port» управление (в Ableton — Remote, в FL — «Generic controller»). Дальше каждую кнопку привязываем через MIDI Learn: в Ableton — Ctrl+M, кликнуть элемент, нажать кнопку геймпада."),
+        learn_step("Play — Back.", button(Button::Back)),
+        learn_step("Record — Start.", button(Button::Start)),
+        learn_step("Stop — A (Cross).", button(Button::South)),
+        learn_step("Петля (Loop) — B (Circle).", button(Button::East)),
+        learn_step("Метроном DAW — X (Square).", button(Button::West)),
+        learn_step("Overdub или Undo — Y (Triangle).", button(Button::North)),
+        learn_step("Крестовина ↑↓ — выбор сцены или клипа, ←→ — выбор трека. Начни с ↑.", button(Button::DpadUp)),
+        learn_step("Громкость выбранного трека — левый стик вверх-вниз: отклонение крутит значение, отпустил — осталось.", Input::Axis { axis: Axis::LeftY }),
+        learn_step("Панорама — левый стик влево-вправо.", Input::Axis { axis: Axis::LeftX }),
+        learn_step("Посылы или макросы — правый стик и курки. Нажатие левого стика — Tap Tempo для метронома здесь (с «MIDI Clock в DAW» темп уйдёт и в DAW).", Input::Axis { axis: Axis::RightY }),
+    ]);
+    Profile {
+        name: "Управление DAW".into(),
+        music: Music { root: 0, octave: 4, scale: Scale::Preset { preset: ScalePreset::Major } },
+        parts: vec![part("В DAW", 0, 0, 0, vec![])],
+        layers: vec![base_layer(base)],
+        meta: ProfileMeta {
+            category: "daw".into(),
+            target: "Ableton Live, FL Studio, Reaper…".into(),
+            description: "Геймпад как пульт: Play/Record/Stop, петля и метроном на кнопках, навигация по трекам и сценам на крестовине, громкость, панорама и посылы — на стиках (относительный режим, значение остаётся, где оставил), курки — две ручки. Нажатие левого стика — Tap Tempo.".into(),
+            setup,
+        },
+    }
+}
+
 /// Все встроенные профили в порядке показа.
 pub fn library() -> Vec<Profile> {
-    vec![classic(), pentatonic(), drums(), ableton_keys(), ableton_drums(), fl_keys(), synth_lead(), synth_bass()]
+    vec![
+        classic(),
+        chords(),
+        pentatonic(),
+        drums(),
+        ableton_keys(),
+        ableton_drums(),
+        fl_keys(),
+        daw_control(),
+        synth_lead(),
+        synth_bass(),
+    ]
 }
 
 #[cfg(test)]

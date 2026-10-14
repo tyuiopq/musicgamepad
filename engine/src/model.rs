@@ -104,6 +104,12 @@ pub enum Action {
         velocity: u8,
         #[serde(default)]
         latch: Latch,
+        /// Длительность, мс: нота звучит столько, сколько задано, независимо от кнопки (0 — пока зажата).
+        #[serde(default, skip_serializing_if = "is_zero")]
+        length_ms: u32,
+        /// Откуда брать силу нажатия.
+        #[serde(default, skip_serializing_if = "VelocitySource::is_fixed")]
+        velocity_from: VelocitySource,
     },
     /// CC от кнопки: `on` при нажатии и `off` при отпускании (или переключателем),
     /// либо шаг `step` к текущему значению при каждом нажатии (относительный режим).
@@ -145,6 +151,29 @@ pub enum Action {
         #[serde(default)]
         relative: bool,
     },
+}
+
+fn is_zero(v: &u32) -> bool {
+    *v == 0
+}
+
+/// Сила нажатия ноты: постоянная (`velocity`) или от отклонения оси —
+/// от `min` при едва тронутой оси до `velocity` при оси до упора.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum VelocitySource {
+    #[default]
+    Fixed,
+    /// Конкретная ось (курок, стик).
+    Axis { axis: Axis, min: u8 },
+    /// Ось, которую тронули последней.
+    LastAxis { min: u8 },
+}
+
+impl VelocitySource {
+    pub fn is_fixed(&self) -> bool {
+        *self == VelocitySource::Fixed
+    }
 }
 
 fn default_velocity() -> u8 {
@@ -257,6 +286,8 @@ pub enum Command {
     LoopUndo,
     /// Лупер: очистить.
     LoopClear,
+    /// Темп по нажатиям: постучи 3–4 раза в нужном темпе.
+    TapTempo,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -329,6 +360,13 @@ pub struct Layer {
     /// (например, «LB+RB»). Такой слой важнее слоёв, из которых состоит.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub combo: Vec<String>,
+    /// Сдвиг нот этого слоя, полутоны (вдобавок к сдвигу партии).
+    #[serde(default, skip_serializing_if = "is_zero_i32")]
+    pub transpose: i32,
+}
+
+fn is_zero_i32(v: &i32) -> bool {
+    *v == 0
 }
 
 /// Звуковая партия: свой MIDI-канал и инструмент. Несколько партий звучат одновременно.

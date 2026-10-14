@@ -1,6 +1,7 @@
 <script lang="ts">
   // Настройка одного входа: роль (нота, аккорд, модификатор, команда, контроллер) и её параметры.
-  import { api, type Action, type AxisMode, type AxisShape, type Binding, type ChordKind, type Command, type ControlTarget, type Latch, type ModEffect, type PresetInfo, type Profile } from "$lib/api";
+  import { api, type Action, type AxisMode, type AxisShape, type Binding, type ChordKind, type Command, type ControlTarget, type Latch, type ModEffect, type PresetInfo, type Profile, type VelocitySource } from "$lib/api";
+  import { untrack } from "svelte";
   import type { Slot } from "$lib/controls";
   import { DEFAULT_THRESHOLD } from "$lib/controls";
   import { effectLabel } from "$lib/describe";
@@ -18,6 +19,7 @@
     inheritedLayer,
     profile,
     axisValue = 0,
+    sounding = [],
     presets = [],
     midiPort = null,
     onchange,
@@ -29,6 +31,7 @@
     inheritedLayer: string | null;
     profile: Profile;
     axisValue?: number;
+    sounding?: number[];
     presets?: PresetInfo[];
     /** Куда сейчас уходит MIDI — для подсказки у кнопки MIDI Learn. */
     midiPort?: string | null;
@@ -139,6 +142,79 @@
     ["toggle", "Защёлка"],
   ];
 
+  // ---------- нота: длительность и сила ----------
+  type NoteAction = Extract<Action, { kind: "note" }>;
+  type NoteMode = Latch | "fixed";
+  const NOTE_MODES: [NoteMode, string][] = [...LATCH, ["fixed", "Своя длина"]];
+  const noteMode = (a: NoteAction): NoteMode => ((a.length_ms ?? 0) > 0 ? "fixed" : (a.latch ?? "hold"));
+  function setNoteMode(m: NoteMode) {
+    edit((a) => {
+      if (a.kind !== "note") return;
+      if (m === "fixed") {
+        a.latch = "hold";
+        a.length_ms = a.length_ms || 250;
+      } else {
+        a.latch = m;
+        delete a.length_ms;
+      }
+    });
+  }
+
+  type VelKind = VelocitySource["type"];
+  const VEL_KINDS: [VelKind, string][] = [
+    ["fixed", "Постоянная"],
+    ["axis", "От оси"],
+    ["last_axis", "От последней оси"],
+  ];
+  const VEL_AXES: [string, string][] = [
+    ["right_trigger", "Правый курок"],
+    ["left_trigger", "Левый курок"],
+    ["left_x", "Левый стик ↔"],
+    ["left_y", "Левый стик ↕"],
+    ["right_x", "Правый стик ↔"],
+    ["right_y", "Правый стик ↕"],
+  ];
+  function setVelKind(k: VelKind) {
+    edit((a) => {
+      if (a.kind !== "note") return;
+      const min = a.velocity_from && a.velocity_from.type !== "fixed" ? a.velocity_from.min : 30;
+      if (k === "fixed") delete a.velocity_from;
+      else if (k === "axis") a.velocity_from = { type: "axis", axis: "right_trigger", min };
+      else a.velocity_from = { type: "last_axis", min };
+    });
+  }
+
+  // ---------- запись аккорда с геймпада ----------
+  let recording = $state(false);
+  let captured = $state<number[]>([]);
+  function startChordRecord() {
+    captured = [];
+    recording = true;
+  }
+  $effect(() => {
+    if (!recording) return;
+    const now = sounding;
+    const prev = untrack(() => captured);
+    if (now.length) {
+      const all = [...new Set([...prev, ...now])].sort((a, b) => a - b);
+      if (all.length !== prev.length) captured = all;
+    } else if (prev.length) {
+      // Всё отпустили — аккорд записан: интервалы от тоники лада
+      const tonic = degreeNote(profile.music, 0);
+      const iv = prev.map((n) => n - tonic);
+      recording = false;
+      edit((a) => {
+        if (a.kind === "note" && a.note.type === "chord") {
+          a.note.chord = "custom";
+          a.note.degree = 0;
+          a.note.intervals = iv;
+          a.note.inversion = 0;
+          a.note.bass = false;
+        }
+      });
+    }
+  });
+
   // ---------- модификаторы ----------
   const EFFECTS: [ModEffect["type"], string][] = [
     ["semitones", "Полутоны"],
@@ -179,6 +255,7 @@
     ["loop_record", "Лупер: записать / наложить слой"],
     ["loop_undo", "Лупер: отменить слой"],
     ["loop_clear", "Лупер: очистить"],
+    ["tap_tempo", "Tap Tempo: темп по нажатиям"],
   ];
 
   function setCommand(type: Command["type"]) {
@@ -285,6 +362,32 @@
   </div>
 {/snippet}
 
+{#snippet noteCommon(a: NoteAction)}
+  {@const vs = a.velocity_from ?? { type: "fixed" }}
+  {@render seg(VEL_KINDS, vs.type, setVelKind)}
+  {#if vs.type === "axis"}
+    <label class="part">
+      <span>Ось</span>
+      <select value={vs.axis} onchange={(e) => edit((x) => x.kind === "note" && x.velocity_from?.type === "axis" && (x.velocity_from.axis = e.currentTarget.value))}>
+        {#each VEL_AXES as [id, text] (id)}<option value={id}>{text}</option>{/each}
+      </select>
+    </label>
+  {/if}
+  {#if vs.type !== "fixed"}
+    {@render range("Сила от", vs.min, 1, 127, 1, (v) => edit((x) => x.kind === "note" && x.velocity_from !== undefined && x.velocity_from.type !== "fixed" && (x.velocity_from.min = v)), String(vs.min))}
+    {@render range("Сила до", a.velocity, 1, 127, 1, (v) => edit((x) => x.kind === "note" && (x.velocity = v)), String(a.velocity))}
+    <p class="hint">
+      {vs.type === "axis" ? "Чем сильнее отклонена ось" : "Чем сильнее отклонена ось, которую тронули последней,"} в момент нажатия — тем громче нота.
+    </p>
+  {:else}
+    {@render range("Сила", a.velocity, 1, 127, 1, (v) => edit((x) => x.kind === "note" && (x.velocity = v)), String(a.velocity))}
+  {/if}
+  {@render seg(NOTE_MODES, noteMode(a), setNoteMode)}
+  {#if noteMode(a) === "fixed"}
+    {@render range("Длина", a.length_ms ?? 250, 20, 4000, 10, (v) => edit((x) => x.kind === "note" && (x.length_ms = v)), `${a.length_ms ?? 250} мс`)}
+  {/if}
+{/snippet}
+
 {#snippet range(label: string, value: number, min: number, max: number, step: number, set: (v: number) => void, text: string)}
   <label class="range">
     <span>{label}</span>
@@ -352,8 +455,7 @@
       )}
       <p class="hint">{drumPart ? "Звук ударной установки." : "Не зависит от лада — удобно для ударных."}</p>
     {/if}
-    {@render range("Сила", action.velocity, 1, 127, 1, (v) => edit((a) => a.kind === "note" && (a.velocity = v)), String(action.velocity))}
-    {@render seg(LATCH, action.latch ?? "hold", (l) => edit((a) => a.kind === "note" && (a.latch = l)))}
+    {@render noteCommon(action)}
   {:else if action?.kind === "note" && action.note.type === "chord"}
     {@const note = action.note}
     {@render stepper(
@@ -378,6 +480,16 @@
     >
       {#each CHORDS as [k, text] (k)}<option value={k}>{text}</option>{/each}
     </select>
+    <div class="record-chord">
+      {#if recording}
+        <span class="hint">Зажми на геймпаде ноты аккорда и отпусти… {captured.map(noteName).join(" · ")}</span>
+        <button type="button" class="link" onclick={() => (recording = false)}>Отмена</button>
+      {:else}
+        <button type="button" class="link" title="Нажми несколько нот на геймпаде одновременно — получится свой аккорд" onclick={startChordRecord}>
+          Записать аккорд с геймпада
+        </button>
+      {/if}
+    </div>
     {#if note.chord === "custom"}
       <label class="part">
         <span>Интервалы</span>
@@ -411,8 +523,7 @@
       </label>
     </div>
     <p class="result">{chordNotes(note).map(noteName).join(" · ")}</p>
-    {@render range("Сила", action.velocity, 1, 127, 1, (v) => edit((a) => a.kind === "note" && (a.velocity = v)), String(action.velocity))}
-    {@render seg(LATCH, action.latch ?? "hold", (l) => edit((a) => a.kind === "note" && (a.latch = l)))}
+    {@render noteCommon(action)}
   {:else if action?.kind === "modifier"}
     {@const effect = action.effect}
     <div class="grid">
@@ -661,6 +772,11 @@
     gap: 8px;
     font-size: 13px;
     color: var(--muted);
+  }
+  .record-chord {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
   }
   .inherited {
     display: flex;
