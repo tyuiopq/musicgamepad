@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use engine::audio::PresetInfo;
+use engine::calibration::Calibration;
 use engine::mapper::{ControlView, Mapper};
 use engine::model::{Command as Action, Profile};
 use engine::transport::TransportSettings;
@@ -345,6 +346,20 @@ async fn import_profile(app: AppHandle) -> CmdResult<Option<String>> {
     Ok(Some(name))
 }
 
+/// Калибровка осей геймпада с этим именем (None — сбросить).
+#[tauri::command]
+fn set_calibration(state: State<AppState>, pad: String, calibration: Option<Calibration>) {
+    state.update_settings(|s| match &calibration {
+        Some(c) => {
+            s.calibration.insert(pad.clone(), c.clone());
+        }
+        None => {
+            s.calibration.remove(&pad);
+        }
+    });
+    state.engine.send(Command::SetCalibration { pad, calibration });
+}
+
 /// Профиль, который включается, когда играешь геймпадом этого семейства (None — не менять).
 #[tauri::command]
 fn set_pad_profile(state: State<AppState>, family: String, profile: Option<String>) {
@@ -649,6 +664,7 @@ pub fn run() {
             export_profile,
             import_profile,
             set_pad_profile,
+            set_calibration,
             set_ui_colors,
             list_sound_library,
             get_presets_for,

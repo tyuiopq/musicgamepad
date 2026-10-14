@@ -1,6 +1,7 @@
 //! Ядро: ввод с геймпада, раскладки, звук, MIDI.
 
 pub mod audio;
+pub mod calibration;
 #[cfg(windows)]
 mod audio_exclusive;
 pub mod engine;

@@ -72,9 +72,12 @@ export type NoteSpec =
 export type Latch = "hold" | "toggle";
 export type AxisMode = "bipolar" | "absolute" | "positive" | "negative";
 
+export type CurveKind = "power" | "s";
+
 export interface AxisShape {
   deadzone: number;
   curve: number;
+  curve_kind?: CurveKind;
   invert: boolean;
   mode: AxisMode;
   /** Сглаживание, мс. */
@@ -253,8 +256,19 @@ export interface Profile {
   meta?: ProfileMeta;
 }
 
+export interface AxisCal {
+  center: number;
+  min: number;
+  max: number;
+}
+
+export interface Calibration {
+  axes: Partial<Record<string, AxisCal>>;
+}
+
 export interface AppSettings {
   pad_profiles: Record<string, string>;
+  calibration?: Record<string, Calibration>;
   ui?: { accent: string | null; secondary: string | null };
 }
 
@@ -282,6 +296,8 @@ export interface Status {
   layers: string[];
   controls: ControlView[];
   axes: Partial<Record<string, number>>;
+  /** Оси до калибровки. */
+  raw_axes?: Partial<Record<string, number>>;
   transpose: number;
   degree_shift: number;
   notes: number[];
@@ -340,6 +356,7 @@ export const api = {
   exportProfile: (name: string) => invoke<string | null>("export_profile", { name }),
   importProfile: () => invoke<string | null>("import_profile"),
   settings: () => invoke<AppSettings>("get_settings"),
+  setCalibration: (pad: string, calibration: Calibration | null) => invoke<void>("set_calibration", { pad, calibration }),
   setPadProfile: (family: string, profile: string | null) => invoke<void>("set_pad_profile", { family, profile }),
   setUiColors: (accent: string, secondary: string) => invoke<void>("set_ui_colors", { accent, secondary }),
   setPadChoice: (choice: PadChoice) => invoke<void>("set_pad_choice", { choice }),

@@ -1,9 +1,10 @@
 <script lang="ts">
   // Экран «Настройки»: геймпады, звук, MIDI-выход, оформление.
   import { onMount } from "svelte";
-  import { api, type ProfileEntry, type Status } from "$lib/api";
+  import { api, type Calibration, type ProfileEntry, type Status } from "$lib/api";
   import { familyName } from "$lib/labels";
   import { applyTheme, DEFAULT_THEME, PRESETS, validTheme, type Theme } from "$lib/theme";
+  import Calibrate from "./Calibrate.svelte";
   import Icon from "./Icon.svelte";
 
   let {
@@ -22,6 +23,13 @@
 
   let ports = $state<string[]>([]);
   let padProfiles = $state<Record<string, string>>({});
+  let calibration = $state<Record<string, Calibration>>({});
+
+  async function refreshSettings() {
+    const s = await api.settings();
+    padProfiles = s.pad_profiles ?? {};
+    calibration = s.calibration ?? {};
+  }
 
   async function refreshPorts() {
     ports = await api.midiPorts();
@@ -29,7 +37,7 @@
 
   onMount(() => {
     refreshPorts();
-    api.settings().then((s) => (padProfiles = s.pad_profiles ?? {}));
+    refreshSettings();
   });
 
   async function setPadProfile(family: string, name: string) {
@@ -78,6 +86,10 @@
         {/each}
       </div>
       {#if status.input_error}<p class="error">{status.input_error}</p>{/if}
+      <div class="sep"></div>
+      <h3 class="card-title">Калибровка</h3>
+      <p class="hint">Если стик в покое «плывёт» или курок не добирает до максимума.</p>
+      <Calibrate {status} saved={calibration} {run} onsaved={refreshSettings} />
       <div class="sep"></div>
       <h3 class="card-title">Свой профиль для каждого типа</h3>
       <p class="hint">Взял геймпад другого типа — включился его профиль.</p>

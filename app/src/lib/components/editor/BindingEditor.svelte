@@ -75,6 +75,31 @@
     emit(defaultAction(r, slot.input));
   }
 
+  // ---------- кривые осей ----------
+  type CurvePreset = "linear" | "exp" | "log" | "s" | "custom";
+  const CURVES: [CurvePreset, string][] = [
+    ["linear", "Линейная"],
+    ["exp", "Экспонента"],
+    ["log", "Логарифм"],
+    ["s", "S-кривая"],
+    ["custom", "Своя"],
+  ];
+  function curvePreset(s: AxisShape): CurvePreset {
+    if (s.curve_kind === "s") return "s";
+    if (Math.abs(s.curve - 1) < 0.001) return "linear";
+    if (Math.abs(s.curve - 2) < 0.001) return "exp";
+    if (Math.abs(s.curve - 0.5) < 0.001) return "log";
+    return "custom";
+  }
+  function applyCurve(s: AxisShape, c: CurvePreset) {
+    s.curve_kind = c === "s" ? "s" : "power";
+    if (c === "linear") s.curve = 1;
+    else if (c === "exp") s.curve = 2;
+    else if (c === "log") s.curve = 0.5;
+    else if (c === "s") s.curve = 2.5;
+    else if ([1, 2, 0.5].includes(s.curve)) s.curve = 1.5;
+  }
+
   function overrideInherited() {
     if (inherited) emit($state.snapshot(inherited.action) as Action);
   }
@@ -537,7 +562,10 @@
       <ShapeCurve {shape} value={axisValue} />
       <div class="curve-controls">
         {@render range("Мёртвая зона", shape.deadzone, 0, 0.5, 0.01, (v) => setShape((s) => (s.deadzone = v)), `${Math.round(shape.deadzone * 100)}%`)}
-        {@render range("Кривая", shape.curve, 0.3, 3, 0.05, (v) => setShape((s) => (s.curve = v)), shape.curve.toFixed(2))}
+        {@render seg(CURVES, curvePreset(shape), (c) => setShape((s) => applyCurve(s, c)))}
+        {#if curvePreset(shape) === "custom" || shape.curve_kind === "s"}
+          {@render range(shape.curve_kind === "s" ? "Сила S" : "Кривая", shape.curve, 0.3, 4, 0.05, (v) => setShape((s) => (s.curve = v)), shape.curve.toFixed(2))}
+        {/if}
         {@render range("Сглаживание", shape.smoothing ?? 0, 0, 200, 5, (v) => setShape((s) => (s.smoothing = v)), shape.smoothing ? `${shape.smoothing} мс` : "нет")}
         <label class="check">
           <input type="checkbox" checked={shape.invert} onchange={(e) => setShape((s) => (s.invert = e.currentTarget.checked))} />

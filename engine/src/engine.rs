@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
+use crate::calibration::Calibration;
 use crate::audio::{AudioMode, PresetInfo, SoundBank, Synth};
 use crate::rack::{new_synth, Pad, RackConfig, Route, SampleData};
 use rustysynth::SoundFont;
@@ -71,6 +72,8 @@ pub struct Settings {
     /// Инструменты, выбранные кнопкой во время игры, — по профилям: (программа, банк) каждой партии.
     /// Так выбор переживает перезапуск, а сам профиль (в т.ч. встроенный) не меняется.
     pub instruments: HashMap<String, Vec<(u8, u16)>>,
+    /// Калибровка осей — по имени геймпада.
+    pub calibration: HashMap<String, Calibration>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -96,6 +99,7 @@ impl Default for Settings {
             pad_profiles: HashMap::new(),
             ui: UiSettings::default(),
             instruments: HashMap::new(),
+            calibration: HashMap::new(),
         }
     }
 }
@@ -112,6 +116,8 @@ pub struct EngineConfig {
 
 pub enum Command {
     SetPadChoice(PadChoice),
+    /// Калибровка геймпада с этим именем (None — сбросить).
+    SetCalibration { pad: String, calibration: Option<Calibration> },
     SetSynthEnabled(bool),
     SetAudioMode(AudioMode),
     SetMasterVolume(f32),
@@ -190,6 +196,8 @@ pub struct Status {
     pub controls: Vec<ControlView>,
     /// Положения стиков и курков.
     pub axes: HashMap<Axis, f32>,
+    /// Те же оси до калибровки — для мастера калибровки.
+    pub raw_axes: HashMap<Axis, f32>,
     pub transpose: i32,
     /// Сдвиг по ступеням от модификаторов.
     pub degree_shift: i32,
@@ -403,6 +411,10 @@ struct Runtime {
     outputs: Vec<Output>,
     /// Скользящее среднее задержки ввода, мс.
     input_ms: Option<f32>,
+    /// Последние сырые значения осей активного геймпада.
+    raw_axes: HashMap<Axis, f32>,
+    /// Калибровка активного геймпада (id геймпада, поправка) — чтобы не искать на каждое движение.
+    cal_cache: Option<(u32, Option<Calibration>)>,
     touched: Option<Touched>,
     /// Какие направления осей сейчас отклонены за порог касания.
     axis_touch: Vec<(Axis, Direction)>,
@@ -456,6 +468,8 @@ impl Runtime {
             last_recording: None,
             outputs: Vec::new(),
             input_ms: None,
+            raw_axes: HashMap::new(),
+            cal_cache: None,
             touched: None,
             axis_touch: Vec::new(),
             dirty: true,
@@ -538,6 +552,7 @@ impl Runtime {
                     self.mapper.release_all();
                     self.active = Some(pad);
                 }
+                let event = self.calibrate(pad, event);
                 self.track_touch(event);
                 if matches!(event, InputEvent::Button { down: true, .. }) {
                     let ms = input::ticks_ns().saturating_sub(t_ns) as f32 / 1e6;
@@ -546,6 +561,20 @@ impl Runtime {
                 self.mapper.handle(event);
                 self.flush();
             }
+        }
+    }
+
+    fn calibrate(&mut self, pad: u32, event: InputEvent) -> InputEvent {
+        let InputEvent::Axis { axis, value } = event else { return event };
+        self.raw_axes.insert(axis, value);
+        if self.cal_cache.as_ref().map(|c| c.0) != Some(pad) {
+            let name = self.input.as_ref().and_then(|i| i.pads().into_iter().find(|p| p.id == pad)).map(|p| p.name);
+            let cal = name.and_then(|n| self.settings.calibration.get(&n).cloned());
+            self.cal_cache = Some((pad, cal));
+        }
+        match &self.cal_cache {
+            Some((_, Some(cal))) => InputEvent::Axis { axis, value: cal.apply(axis, value) },
+            _ => event,
         }
     }
 
@@ -592,6 +621,13 @@ impl Runtime {
     fn on_command(&mut self, cmd: Command) {
         self.dirty = true;
         match cmd {
+            Command::SetCalibration { pad, calibration } => {
+                match calibration {
+                    Some(c) => self.settings.calibration.insert(pad, c),
+                    None => self.settings.calibration.remove(&pad),
+                };
+                self.cal_cache = None;
+            }
             Command::SetPadChoice(choice) => {
                 self.settings.pad = choice;
                 let next = match &self.settings.pad {
@@ -1301,6 +1337,7 @@ impl Runtime {
             music: Some(profile.music.clone()),
             controls: self.mapper.preview(),
             axes: self.mapper.axis_values(),
+            raw_axes: self.raw_axes.clone(),
             layers: self.mapper.active_layers().iter().map(|l| l.name.clone()).collect(),
             transpose: self.mapper.transpose(),
             degree_shift: self.mapper.offset().1,

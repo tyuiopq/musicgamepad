@@ -278,8 +278,10 @@ pub enum ControlTarget {
 pub struct AxisShape {
     /// Мёртвая зона у нуля (против дрейфа стиков), 0..1.
     pub deadzone: f32,
-    /// Кривая: 1 — линейно, >1 — мягче у центра, <1 — резче.
+    /// Сила кривой: 1 — линейно, >1 — мягче у центра, <1 — резче.
     pub curve: f32,
+    /// Вид кривой: степенная или S-образная.
+    pub curve_kind: CurveKind,
     pub invert: bool,
     pub mode: AxisMode,
     /// Сглаживание, мс: убирает дрожание стика (0 — без сглаживания).
@@ -288,8 +290,19 @@ pub struct AxisShape {
 
 impl Default for AxisShape {
     fn default() -> Self {
-        Self { deadzone: 0.15, curve: 1.0, invert: false, mode: AxisMode::Bipolar, smoothing: 0.0 }
+        Self { deadzone: 0.15, curve: 1.0, curve_kind: CurveKind::Power, invert: false, mode: AxisMode::Bipolar, smoothing: 0.0 }
     }
+}
+
+/// Форма кривой отклика оси.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CurveKind {
+    /// a^k: k>1 — экспонента (мягко у центра), k<1 — логарифм (резко у центра).
+    #[default]
+    Power,
+    /// a^k / (a^k + (1−a)^k): мягко у центра и у края, быстро в середине хода.
+    S,
 }
 
 /// Выход формы: `Bipolar` даёт −1..1, остальные режимы 0..1.

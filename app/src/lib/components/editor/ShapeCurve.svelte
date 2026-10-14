@@ -13,7 +13,13 @@
     const dz = Math.min(Math.max(shape.deadzone, 0), 0.95);
     const a = Math.abs(v);
     const s = a < dz ? 0 : Math.min((a - dz) / (1 - dz), 1);
-    const c = Math.sign(v) * Math.pow(s, Math.max(shape.curve, 0.05));
+    const k = Math.max(shape.curve, 0.05);
+    let b = Math.pow(s, k);
+    if (shape.curve_kind === "s") {
+      const q = Math.pow(1 - s, k);
+      b = b + q > 0 ? b / (b + q) : s;
+    }
+    const c = Math.sign(v) * b;
     switch (shape.mode) {
       case "bipolar":
         return c;

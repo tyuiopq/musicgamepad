@@ -825,7 +825,16 @@ pub fn shape_value(raw: f32, shape: AxisShape) -> f32 {
     let dz = shape.deadzone.clamp(0.0, 0.95);
     let a = v.abs();
     let a = if a < dz { 0.0 } else { ((a - dz) / (1.0 - dz)).min(1.0) };
-    let v = a.powf(shape.curve.max(0.05)).copysign(v);
+    let k = shape.curve.max(0.05);
+    let a = match shape.curve_kind {
+        CurveKind::Power => a.powf(k),
+        CurveKind::S => {
+            let p = a.powf(k);
+            let q = (1.0 - a).powf(k);
+            if p + q > 0.0 { p / (p + q) } else { a }
+        }
+    };
+    let v = a.copysign(v);
     match shape.mode {
         AxisMode::Bipolar => v,
         AxisMode::Absolute => v.abs(),
@@ -857,6 +866,18 @@ mod tests {
 
     fn axis(m: &mut Mapper, axis: Axis, value: f32) {
         m.handle(InputEvent::Axis { axis, value });
+    }
+
+    #[test]
+    fn s_curve_is_soft_at_both_ends() {
+        let s = AxisShape { deadzone: 0.0, curve: 2.0, curve_kind: CurveKind::S, mode: AxisMode::Positive, ..Default::default() };
+        assert!((shape_value(0.5, s) - 0.5).abs() < 1e-6, "середина остаётся серединой");
+        assert!(shape_value(0.1, s) < 0.1 / 2.0, "у начала мягче линейной");
+        assert!(shape_value(0.9, s) > 0.9 + 0.05, "у конца быстрее добирает до максимума");
+        assert_eq!(shape_value(1.0, s), 1.0);
+        assert_eq!(shape_value(0.0, s), 0.0);
+        let lin = AxisShape { curve: 1.0, ..s };
+        assert!((shape_value(0.3, lin) - 0.3).abs() < 1e-6, "S-кривая с силой 1 — линейная");
     }
 
     fn fresh() -> Mapper {
@@ -1333,7 +1354,7 @@ mod tests {
 
     #[test]
     fn shape_curve_and_modes() {
-        let s = AxisShape { deadzone: 0.0, curve: 2.0, invert: false, mode: AxisMode::Bipolar, smoothing: 0.0 };
+        let s = AxisShape { deadzone: 0.0, curve: 2.0, invert: false, mode: AxisMode::Bipolar, smoothing: 0.0, curve_kind: CurveKind::Power };
         assert!((shape_value(-0.5, s) + 0.25).abs() < 1e-6);
         let s = AxisShape { mode: AxisMode::Negative, deadzone: 0.0, ..s };
         assert_eq!(shape_value(0.5, s), 0.0);
