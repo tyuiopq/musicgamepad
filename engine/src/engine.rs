@@ -17,6 +17,7 @@ use rustysynth::SoundFont;
 use crate::input::{self, GamepadInput, PadInfo, RawEvent};
 use crate::mapper::{ControlView, InputEvent, Mapper, Output};
 use crate::midi::{self, MidiMsg, Recorder, SmfOptions};
+use crate::midi_in::{ClockEvent, ClockIn};
 use crate::midi_out::MidiOut;
 use crate::model::{Axis, Command as Action, Direction, Music, PartSource, Profile, SwitchKey};
 use crate::transport::{self, Clock, LoopEffects, LoopState, Looper, Metronome, TransportSettings};
@@ -74,6 +75,8 @@ pub struct Settings {
     pub instruments: HashMap<String, Vec<(u8, u16)>>,
     /// Калибровка осей — по имени геймпада.
     pub calibration: HashMap<String, Calibration>,
+    /// MIDI-вход, с которого брать темп и Start/Stop (MIDI Clock от DAW).
+    pub clock_in: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -100,6 +103,7 @@ impl Default for Settings {
             ui: UiSettings::default(),
             instruments: HashMap::new(),
             calibration: HashMap::new(),
+            clock_in: None,
         }
     }
 }
@@ -116,6 +120,8 @@ pub struct EngineConfig {
 
 pub enum Command {
     SetPadChoice(PadChoice),
+    /// Откуда принимать MIDI Clock (None — не принимать, темп свой).
+    SetClockIn(Option<String>),
     /// Калибровка геймпада с этим именем (None — сбросить).
     SetCalibration { pad: String, calibration: Option<Calibration> },
     SetSynthEnabled(bool),
@@ -180,6 +186,20 @@ pub struct Latency {
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct MidiStatus {
     pub port: Option<String>,
+    pub error: Option<String>,
+    /// Свои выходы партий: порт и ошибка (если не подключился).
+    pub extra: Vec<ExtraOut>,
+    pub clock_in: Option<String>,
+    pub clock_in_error: Option<String>,
+    /// Приходит MIDI Clock — темп задаёт DAW.
+    pub clock_external: bool,
+    /// DAW играет (был Start/Continue).
+    pub clock_playing: bool,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct ExtraOut {
+    pub port: String,
     pub error: Option<String>,
 }
 
@@ -252,7 +272,14 @@ pub struct TransportStatus {
 enum Source {
     Audition,
     Loop,
+    /// Нота, сдвинутая живым квантованием к доле.
+    Live,
 }
+
+/// Повтор подключения MIDI-портов, которые пропали (выдернули интерфейс, закрыли loopMIDI).
+const MIDI_RETRY: Duration = Duration::from_secs(2);
+/// Шаг темпа от внешних часов меньше этого не считаем сменой темпа (дрожание).
+const EXT_BPM_STEP: f32 = 0.3;
 
 /// Последний контрол, которого коснулись на геймпаде (для «назначить с геймпада»).
 /// `seq` растёт с каждым касанием, так интерфейс отличает новое касание от старого.
@@ -431,6 +458,18 @@ struct Runtime {
     synth_error: Option<String>,
     last_audio_try: Instant,
     midi_out: Option<MidiOut>,
+    /// Свои выходы партий (по имени порта) и какие каналы куда идут.
+    extra_outs: HashMap<String, MidiOut>,
+    extra_errors: HashMap<String, String>,
+    channel_ports: [Option<String>; 16],
+    last_midi_try: Instant,
+    clock_in: Option<ClockIn>,
+    clock_in_error: Option<String>,
+    clock_tx: Sender<(ClockEvent, Instant)>,
+    clock_rx: Receiver<(ClockEvent, Instant)>,
+    ext: transport::ExternalClock,
+    /// Ноты, отложенные живым квантованием: (канал, нота) → (когда прозвучит, когда нажали).
+    live_pending: HashMap<(u8, u8), (Instant, Instant)>,
     midi_error: Option<String>,
     recorder: Option<Recorder>,
     last_recording: Option<String>,
@@ -451,6 +490,7 @@ struct Runtime {
 
 impl Runtime {
     fn new(config: EngineConfig, shared: Arc<Mutex<Shared>>) -> Self {
+        let (clock_tx, clock_rx) = mpsc::channel();
         // Таймер Windows по умолчанию тикает раз в ~15 мс — метроному и луперу нужна 1 мс
         #[cfg(windows)]
         unsafe {
@@ -492,6 +532,16 @@ impl Runtime {
             synth_error: None,
             last_audio_try: Instant::now(),
             midi_out: None,
+            extra_outs: HashMap::new(),
+            extra_errors: HashMap::new(),
+            channel_ports: Default::default(),
+            last_midi_try: Instant::now(),
+            clock_in: None,
+            clock_in_error: None,
+            clock_tx,
+            clock_rx,
+            ext: transport::ExternalClock::default(),
+            live_pending: HashMap::new(),
             midi_error: None,
             recorder: None,
             last_recording: None,
@@ -512,6 +562,10 @@ impl Runtime {
         }
         if let Some(port) = rt.settings.midi_out.clone() {
             rt.connect_midi(&port);
+        }
+        rt.sync_ports();
+        if let Some(port) = rt.settings.clock_in.clone() {
+            rt.connect_clock_in(&port);
         }
         match GamepadInput::new() {
             Ok(input) => rt.input = Some(input),
@@ -541,6 +595,8 @@ impl Runtime {
                 self.on_command(cmd);
             }
             self.check_audio();
+            self.check_midi();
+            self.poll_clock_in();
             self.tick_mapper();
             self.tick_transport(Instant::now());
             self.run_scheduled();
@@ -727,7 +783,17 @@ impl Runtime {
                     self.mapper = Mapper::new(*profile);
                 }
                 self.sync_sounds(false);
+                self.sync_ports();
                 self.flush();
+            }
+            Command::SetClockIn(port) => {
+                self.clock_in = None;
+                self.clock_in_error = None;
+                self.ext = transport::ExternalClock::default();
+                self.settings.clock_in = port.clone();
+                if let Some(port) = port {
+                    self.connect_clock_in(&port);
+                }
             }
             Command::SetMasterVolume(v) => {
                 self.settings.master_volume = v;
@@ -754,6 +820,7 @@ impl Runtime {
                 }
             }
             Command::Panic => {
+                self.drop_live_pending();
                 self.mapper.panic();
                 self.flush();
             }
@@ -783,14 +850,47 @@ impl Runtime {
         for out in &outputs {
             match out {
                 Output::Midi(msg) => {
-                    self.dispatch(*msg);
-                    self.looper.capture(now, *msg);
+                    if !self.live_quantize(*msg, now) {
+                        self.dispatch(*msg);
+                        self.looper.capture(now, *msg);
+                    }
                 }
                 Output::Command(action) => self.transport_action(action.clone()),
             }
         }
         self.outputs = outputs;
         self.outputs.clear();
+    }
+
+    /// Живое квантование: Note On переносится на ближайшую долю сетки (если она впереди),
+    /// его Note Off — на столько же позже, чтобы длительность нажатия сохранилась.
+    /// true — сообщение отложено.
+    fn live_quantize(&mut self, msg: MidiMsg, now: Instant) -> bool {
+        let Some(grid) = self.settings.transport.live_quantize.grid() else { return false };
+        if !self.clock.running() || !(msg.is_note_on() || msg.is_note_off()) {
+            return false;
+        }
+        let key = (msg.channel(), msg.bytes[1]);
+        if msg.is_note_on() {
+            let Some(at) = self.clock.snap(now, grid, &self.settings.transport) else { return false };
+            if at <= now + Duration::from_millis(2) {
+                return false;
+            }
+            self.live_pending.insert(key, (at, now));
+            self.scheduled.push((at, msg, Source::Live));
+            return true;
+        }
+        // Note On ещё ждёт своей доли — Note Off сдвигаем следом
+        let Some((at, pressed)) = self.live_pending.remove(&key) else { return false };
+        let held = now.duration_since(pressed).max(Duration::from_millis(30));
+        self.scheduled.push((at + held, msg, Source::Live));
+        true
+    }
+
+    /// Снять отложенные квантованием ноты (паника): их Note On ещё не ушли.
+    fn drop_live_pending(&mut self) {
+        self.scheduled.retain(|(_, _, s)| *s != Source::Live);
+        self.live_pending.clear();
     }
 
     /// Отправить сообщение: с ограничением частоты для контроллеров.
@@ -866,12 +966,26 @@ impl Runtime {
         {
             synth.send(msg);
         }
-        if let Some(out) = &mut self.midi_out
-            && let Err(e) = out.send(msg)
-        {
-            self.midi_error = Some(e.to_string());
-            self.midi_out = None;
-            self.dirty = true;
+        let port = if msg.is_system() { None } else { self.channel_ports[msg.channel() as usize & 15].as_ref() };
+        match port {
+            Some(port) => {
+                if let Some(out) = self.extra_outs.get_mut(port)
+                    && let Err(e) = out.send(msg)
+                {
+                    self.extra_errors.insert(port.clone(), e.to_string());
+                    self.extra_outs.remove(&port.clone());
+                    self.dirty = true;
+                }
+            }
+            None => {
+                if let Some(out) = &mut self.midi_out
+                    && let Err(e) = out.send(msg)
+                {
+                    self.midi_error = Some(e.to_string());
+                    self.midi_out = None;
+                    self.dirty = true;
+                }
+            }
         }
         if let Some(rec) = &mut self.recorder {
             rec.add(msg);
@@ -887,6 +1001,126 @@ impl Runtime {
         if let Some(out) = &mut self.midi_out {
             for m in msgs {
                 let _ = out.send(m);
+            }
+        }
+    }
+
+    /// Подключить свои выходы партий из профиля и отключить ненужные.
+    fn sync_ports(&mut self) {
+        let mut ports: [Option<String>; 16] = Default::default();
+        for p in &self.mapper.profile().parts {
+            if let Some(port) = p.port.as_ref().filter(|x| !x.is_empty()) {
+                ports[p.channel as usize & 15] = Some(port.clone());
+            }
+        }
+        let wanted: Vec<String> = ports.iter().flatten().cloned().collect();
+        let silence = self.all_notes_off();
+        let stale: Vec<String> = self.extra_outs.keys().filter(|k| !wanted.contains(k)).cloned().collect();
+        for port in stale {
+            if let Some(mut out) = self.extra_outs.remove(&port) {
+                for m in &silence {
+                    let _ = out.send(*m);
+                }
+            }
+        }
+        self.extra_errors.retain(|k, _| wanted.contains(k));
+        self.channel_ports = ports;
+        for port in wanted {
+            if !self.extra_outs.contains_key(&port) {
+                self.connect_extra(&port);
+            }
+        }
+        self.dirty = true;
+    }
+
+    fn connect_extra(&mut self, port: &str) {
+        match MidiOut::connect(port) {
+            Ok(mut out) => {
+                let state = self.mapper.state_messages();
+                for m in state.into_iter().filter(|m| self.channel_ports[m.channel() as usize & 15].as_deref() == Some(port)) {
+                    let _ = out.send(m);
+                }
+                self.extra_outs.insert(port.to_string(), out);
+                self.extra_errors.remove(port);
+            }
+            Err(e) => {
+                self.extra_errors.insert(port.to_string(), e.to_string());
+            }
+        }
+    }
+
+    /// Переподключить пропавшие MIDI-порты (раз в пару секунд).
+    fn check_midi(&mut self) {
+        if self.last_midi_try.elapsed() < MIDI_RETRY {
+            return;
+        }
+        self.last_midi_try = Instant::now();
+        if self.midi_out.is_none()
+            && let Some(port) = self.settings.midi_out.clone()
+        {
+            self.connect_midi(&port);
+            if self.midi_out.is_some() {
+                self.midi_error = None;
+                self.dirty = true;
+            }
+        }
+        let missing: Vec<String> = self.extra_errors.keys().cloned().collect();
+        for port in missing {
+            self.connect_extra(&port);
+            self.dirty = true;
+        }
+        if self.clock_in.is_none()
+            && let Some(port) = self.settings.clock_in.clone()
+        {
+            self.connect_clock_in(&port);
+            self.dirty = true;
+        }
+    }
+
+    fn connect_clock_in(&mut self, port: &str) {
+        match ClockIn::connect(port, self.clock_tx.clone()) {
+            Ok(c) => {
+                self.clock_in = Some(c);
+                self.clock_in_error = None;
+            }
+            Err(e) => self.clock_in_error = Some(e.to_string()),
+        }
+    }
+
+    /// Внешние часы: Start/Stop ведут наши часы, тики — темп и позицию доли.
+    fn poll_clock_in(&mut self) {
+        while let Ok((event, t)) = self.clock_rx.try_recv() {
+            self.dirty = true;
+            match event {
+                ClockEvent::Start => {
+                    self.ext.start();
+                    self.clock.stop();
+                }
+                ClockEvent::Continue => self.ext.resume(),
+                ClockEvent::Stop => self.ext.stop(),
+                ClockEvent::Tick => {
+                    let count = self.ext.count;
+                    if let Some(bpm) = self.ext.tick(t)
+                        && (bpm - self.settings.transport.bpm).abs() >= EXT_BPM_STEP
+                    {
+                        let mut ts = self.settings.transport.clone();
+                        ts.bpm = (bpm * 10.0).round() / 10.0;
+                        self.set_transport(ts);
+                    }
+                    if !self.ext.playing {
+                        continue;
+                    }
+                    let ts = self.settings.transport.clone();
+                    if !self.clock.running() {
+                        // Первый тик после Start — начало доли
+                        self.clock.start(t);
+                        self.clock.align(t, count as f64 / 24.0, &ts);
+                        self.metronome.sync(&self.clock, t, &ts);
+                    } else if count.is_multiple_of(24) {
+                        // На каждой доле подстраиваемся под DAW, чтобы не разъезжаться
+                        self.clock.align(t, count as f64 / 24.0, &ts);
+                    }
+                }
             }
         }
     }
@@ -1087,6 +1321,14 @@ impl Runtime {
         self.scheduled = later;
         due.sort_by_key(|(t, msg, _)| (*t, msg.is_note_on()));
         for (_, msg, source) in due {
+            if source == Source::Live {
+                if msg.is_note_on() {
+                    let key = (msg.channel(), msg.bytes[1]);
+                    // Нота прозвучала — её Note Off дальше идёт без задержки
+                    self.live_pending.remove(&key);
+                }
+                self.looper.capture(now, msg);
+            }
             if source == Source::Loop {
                 let key = (msg.channel(), msg.bytes[1]);
                 if msg.is_note_on() {
@@ -1157,7 +1399,7 @@ impl Runtime {
             }
             self.dirty = true;
             // Часы больше никому не нужны — останавливаем
-            if !self.clock_audible() && self.looper.state == LoopState::Empty {
+            if !self.clock_audible() && self.looper.state == LoopState::Empty && !self.ext.playing {
                 self.clock.stop();
             }
         }
@@ -1172,7 +1414,8 @@ impl Runtime {
     /// MIDI Clock для DAW: Start при запуске часов, 24 тика на долю, Stop при остановке.
     fn tick_midi_clock(&mut self, now: Instant) {
         let running = self.clock.running();
-        if !self.settings.transport.send_clock {
+        // Темп пришёл от DAW — обратно часы не шлём, иначе получится петля
+        if !self.settings.transport.send_clock || self.clock_in.is_some() {
             self.clock_was_running = running;
             return;
         }
@@ -1420,7 +1663,20 @@ impl Runtime {
                     Some(Latency { input: self.input_ms, block, output, total })
                 }),
             },
-            midi: MidiStatus { port: self.midi_out.as_ref().map(|m| m.port.clone()), error: self.midi_error.clone() },
+            midi: MidiStatus {
+                port: self.midi_out.as_ref().map(|m| m.port.clone()),
+                error: self.midi_error.clone(),
+                extra: {
+                    let mut ports: Vec<String> = self.channel_ports.iter().flatten().cloned().collect();
+                    ports.sort();
+                    ports.dedup();
+                    ports.into_iter().map(|port| ExtraOut { error: self.extra_errors.get(&port).cloned(), port }).collect()
+                },
+                clock_in: self.clock_in.as_ref().map(|c| c.port.clone()),
+                clock_in_error: self.clock_in_error.clone(),
+                clock_external: self.ext.alive(Instant::now()),
+                clock_playing: self.ext.playing,
+            },
             recording: self.record_phase == RecordPhase::Recording,
             last_recording: self.last_recording.clone(),
             touched: self.touched.clone(),

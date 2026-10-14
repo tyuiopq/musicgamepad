@@ -85,7 +85,7 @@
       <Gamepad controls={status.controls} pressed={status.pressed} axes={status.axes} {family} {profile} />
     </section>
     <aside class="side">
-      <Transport transport={status.transport} {run} />
+      <Transport transport={status.transport} {run} external={status.midi.clock_external ?? false} />
     </aside>
   </div>
 

@@ -80,6 +80,7 @@ pub fn classic() -> Profile {
         music: Music { root: 0, octave: 4, scale: Scale::Preset { preset: ScalePreset::Major } },
         parts: vec![Part {
             name: "Мелодия".into(),
+            port: None,
             channel: 0,
             program: 0,
             bank: 0,
@@ -128,6 +129,7 @@ fn trigger(mode: AxisMode) -> AxisShape {
 fn part(name: &str, channel: u8, program: u8, bank: u16, instruments: Vec<u8>) -> Part {
     Part {
         name: name.into(),
+        port: None,
         channel,
         program,
         bank,

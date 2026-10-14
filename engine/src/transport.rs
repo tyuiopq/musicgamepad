@@ -26,6 +26,8 @@ pub struct TransportSettings {
     pub send_clock: bool,
     /// Слать MMC (Record/Stop) при записи — для DAW, которые его понимают.
     pub send_mmc: bool,
+    /// Живое квантование: пока идут часы, ноты подтягиваются к ближайшей доле сетки.
+    pub live_quantize: Quantize,
 }
 
 impl Default for TransportSettings {
@@ -41,6 +43,7 @@ impl Default for TransportSettings {
             export_wav: false,
             send_clock: false,
             send_mmc: false,
+            live_quantize: Quantize::Off,
         }
     }
 }
@@ -97,6 +100,18 @@ impl Clock {
     /// Начало следующего такта.
     pub fn next_bar(&self, now: Instant, s: &TransportSettings) -> Option<Instant> {
         Some(self.bar_start(now, s)? + s.bar_len())
+    }
+
+    /// Поставить позицию: в момент `now` идёт доля `beats` (подстройка под внешние часы).
+    pub fn align(&mut self, now: Instant, beats: f64, s: &TransportSettings) {
+        self.origin = Some(now.checked_sub(s.beat_len().mul_f64(beats)).unwrap_or(now));
+    }
+
+    /// Ближайший к `now` узел сетки с шагом `grid` тиков (PPQ 480). None — часы стоят.
+    pub fn snap(&self, now: Instant, grid: u32, s: &TransportSettings) -> Option<Instant> {
+        let step = grid as f64 / crate::midi::PPQ as f64;
+        let k = (self.beats(now, s)? / step).round();
+        self.beat_time(0, s).map(|origin| origin + s.beat_len().mul_f64(k * step))
     }
 
     /// Сменить темп, не сдвигая текущую позицию.
@@ -374,6 +389,59 @@ impl Looper {
     }
 }
 
+/// Внешние часы (MIDI Clock от DAW): темп по промежуткам между тиками, позиция — по их счёту.
+#[derive(Default)]
+pub struct ExternalClock {
+    ticks: std::collections::VecDeque<Instant>,
+    /// Тиков с последнего Start: 24 на долю.
+    pub count: u64,
+    pub playing: bool,
+}
+
+/// По скольким последним тикам считать темп (две доли — сглаживает дрожание loopMIDI).
+const EXT_WINDOW: usize = 48;
+/// Тики реже этого — часы пропали.
+const EXT_TIMEOUT: Duration = Duration::from_millis(600);
+
+impl ExternalClock {
+    pub fn start(&mut self) {
+        self.count = 0;
+        self.playing = true;
+    }
+
+    pub fn resume(&mut self) {
+        self.playing = true;
+    }
+
+    pub fn stop(&mut self) {
+        self.playing = false;
+    }
+
+    /// Учесть тик; вернуть темп, если тиков уже хватает для оценки.
+    pub fn tick(&mut self, t: Instant) -> Option<f32> {
+        if self.ticks.back().is_some_and(|&last| t.duration_since(last) > EXT_TIMEOUT) {
+            self.ticks.clear();
+        }
+        self.ticks.push_back(t);
+        if self.ticks.len() > EXT_WINDOW {
+            self.ticks.pop_front();
+        }
+        if self.playing {
+            self.count += 1;
+        }
+        if self.ticks.len() < 24 {
+            return None;
+        }
+        let span = t.duration_since(*self.ticks.front()?).as_secs_f64() / (self.ticks.len() - 1) as f64;
+        (span > 0.0).then(|| (60.0 / (span * 24.0)) as f32)
+    }
+
+    /// Идут ли тики прямо сейчас.
+    pub fn alive(&self, now: Instant) -> bool {
+        self.ticks.back().is_some_and(|&t| now.duration_since(t) <= EXT_TIMEOUT)
+    }
+}
+
 /// Нажатия дальше этого друг от друга — новая серия.
 const TAP_GAP: Duration = Duration::from_millis(2500);
 
@@ -396,6 +464,37 @@ pub fn tap_tempo(taps: &mut Vec<Instant>, now: Instant) -> Option<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn external_clock_tempo_and_position() {
+        let t0 = Instant::now();
+        let mut ext = ExternalClock::default();
+        ext.start();
+        let tick = Duration::from_secs_f64(0.5 / 24.0); // 120 BPM
+        let mut bpm = None;
+        for i in 0..48u32 {
+            bpm = ext.tick(t0 + tick * i);
+        }
+        assert!((bpm.unwrap() - 120.0).abs() < 0.01);
+        assert_eq!(ext.count, 48, "две доли");
+        assert!(ext.alive(t0 + tick * 48));
+        assert!(!ext.alive(t0 + Duration::from_secs(3)));
+        assert_eq!(ext.tick(t0 + Duration::from_secs(5)), None, "после паузы темп считается заново");
+    }
+
+    #[test]
+    fn snap_to_grid() {
+        let s = TransportSettings { bpm: 120.0, ..Default::default() };
+        let t0 = Instant::now();
+        let mut clock = Clock::default();
+        clock.start(t0);
+        let ms = |m: u64| t0 + Duration::from_millis(m);
+        // шестнадцатая при 120 — 125 мс
+        assert_eq!(clock.snap(ms(110), 120, &s), Some(ms(125)));
+        assert_eq!(clock.snap(ms(260), 120, &s), Some(ms(250)));
+        clock.align(ms(1000), 1.0, &s);
+        assert_eq!(clock.beats(ms(1000), &s), Some(1.0));
+    }
 
     #[test]
     fn tap_tempo_averages_and_restarts() {

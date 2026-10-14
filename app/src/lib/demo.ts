@@ -114,6 +114,7 @@ export const demo: Record<string, (args?: Record<string, unknown>) => unknown> =
     ui: { accent: new URLSearchParams(location.search).get("accent"), secondary: null },
   }),
   list_midi_ports: () => ["loopMIDI Port", "Microsoft GS Wavetable Synth"],
+  list_midi_in_ports: () => ["loopMIDI Port", "Arturia KeyStep"],
   preview_profile: (args) => (args?.layer === "chords" ? scene.chords : scene.controls),
   apply_profile: () => undefined,
   get_presets: () => scene.presets,

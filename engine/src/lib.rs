@@ -8,6 +8,7 @@ pub mod engine;
 pub mod input;
 pub mod mapper;
 pub mod midi;
+pub mod midi_in;
 pub mod midi_out;
 pub mod model;
 pub mod presets;

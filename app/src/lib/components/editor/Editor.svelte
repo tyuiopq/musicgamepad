@@ -461,7 +461,7 @@
     {#if error}<p class="error">{error}</p>{/if}
 
     {#if tab === "sound"}
-      <SoundPanel profile={draft} {presets} onchange={changed} onaudition={audition} ontest={sendTest} />
+      <SoundPanel profile={draft} {presets} onchange={changed} onaudition={audition} ontest={sendTest} midi={status.midi} />
     {:else}
       <div class="work">
         <section class="card pad">

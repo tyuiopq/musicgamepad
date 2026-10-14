@@ -209,6 +209,18 @@ fn list_midi_ports() -> Vec<String> {
 }
 
 #[tauri::command]
+fn list_midi_in_ports() -> Vec<String> {
+    engine::midi_in::list_ports()
+}
+
+/// MIDI-вход, с которого брать темп и Start/Stop DAW (None — свой темп).
+#[tauri::command]
+fn set_clock_in(state: State<AppState>, port: Option<String>) {
+    state.update_settings(|s| s.clock_in = port.clone());
+    state.engine.send(Command::SetClockIn(port));
+}
+
+#[tauri::command]
 fn set_pad_choice(state: State<AppState>, choice: PadChoice) {
     state.update_settings(|s| s.pad = choice.clone());
     state.engine.send(Command::SetPadChoice(choice));
@@ -653,6 +665,8 @@ pub fn run() {
             get_presets,
             get_settings,
             list_midi_ports,
+            list_midi_in_ports,
+            set_clock_in,
             set_pad_choice,
             set_synth_enabled,
             set_audio_mode,

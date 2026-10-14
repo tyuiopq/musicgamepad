@@ -117,6 +117,8 @@ export interface TransportSettings {
   export_wav: boolean;
   send_clock: boolean;
   send_mmc: boolean;
+  /** Живое квантование: ноты подтягиваются к доле, пока идут часы. */
+  live_quantize?: Quantize;
 }
 
 export type MonitorInput = { kind: "button"; button: string; down: boolean } | { kind: "axis"; axis: string; value: number };
@@ -245,6 +247,8 @@ export interface Part {
   instruments: number[];
   transpose: number;
   sound: Sound;
+  /** Свой MIDI-выход партии; нет поля — основной из настроек. */
+  port?: string | null;
   /** Нет поля — основной банк. */
   source?: PartSource;
 }
@@ -285,7 +289,20 @@ export interface Calibration {
   axes: Partial<Record<string, AxisCal>>;
 }
 
+export interface MidiStatus {
+  port: string | null;
+  error: string | null;
+  /** Свои выходы партий. */
+  extra?: { port: string; error: string | null }[];
+  clock_in?: string | null;
+  clock_in_error?: string | null;
+  /** Приходит MIDI Clock — темп задаёт DAW. */
+  clock_external?: boolean;
+  clock_playing?: boolean;
+}
+
 export interface AppSettings {
+  clock_in?: string | null;
   pad_profiles: Record<string, string>;
   calibration?: Record<string, Calibration>;
   ui?: { accent: string | null; secondary: string | null };
@@ -334,7 +351,7 @@ export interface Status {
     error: string | null;
     latency: Latency | null;
   };
-  midi: { port: string | null; error: string | null };
+  midi: MidiStatus;
   recording: boolean;
   last_recording: string | null;
   touched: Touched | null;
@@ -365,6 +382,8 @@ export interface ProfileEntry {
 export const api = {
   status: () => invoke<Status>("get_status"),
   midiPorts: () => invoke<string[]>("list_midi_ports"),
+  midiInPorts: () => invoke<string[]>("list_midi_in_ports"),
+  setClockIn: (port: string | null) => invoke<void>("set_clock_in", { port }),
   profiles: () => invoke<ProfileEntry[]>("list_profiles"),
   selectProfile: (name: string) => invoke<void>("select_profile", { name }),
   profile: () => invoke<Profile>("get_profile"),

@@ -22,6 +22,7 @@
   } = $props();
 
   let ports = $state<string[]>([]);
+  let inPorts = $state<string[]>([]);
   let padProfiles = $state<Record<string, string>>({});
   let calibration = $state<Record<string, Calibration>>({});
 
@@ -33,6 +34,7 @@
 
   async function refreshPorts() {
     ports = await api.midiPorts();
+    inPorts = await api.midiInPorts();
   }
 
   onMount(() => {
@@ -197,6 +199,37 @@
         >
         <input type="checkbox" class="switch" checked={ts.send_mmc} onchange={(e) => run(() => api.setTransport({ ...ts, send_mmc: e.currentTarget.checked }))} />
       </label>
+      <div class="sep"></div>
+      <h3 class="card-title">Темп от DAW</h3>
+      <label class="field" style="--label-w: 110px">
+        <span class="label">MIDI Clock с</span>
+        <select class="select select-sm" value={status.midi.clock_in ?? ""} onchange={(e) => run(() => api.setClockIn(e.currentTarget.value || null))}>
+          <option value="">Не принимать — свой темп</option>
+          {#each inPorts as p (p)}<option value={p}>{p}</option>{/each}
+        </select>
+      </label>
+      {#if status.midi.clock_in_error}
+        <p class="error">{status.midi.clock_in_error}</p>
+      {:else if status.midi.clock_in}
+        <p class="hint">
+          {#if status.midi.clock_external}
+            Темп идёт от DAW: {ts.bpm} BPM{status.midi.clock_playing ? ", DAW играет" : ", DAW стоит"}.
+          {:else}
+            Жду MIDI Clock. В Ableton: Preferences → Link, Tempo & MIDI, у выхода в этот порт включи Sync.
+          {/if}
+        </p>
+      {/if}
+      <p class="hint">
+        DAW ведёт темп, а Play в DAW запускает здесь метроном, лупер и живое квантование — всё в долю. Отправка MIDI Clock в DAW при этом
+        выключается, чтобы часы не ходили по кругу. Для приёма нужен второй порт loopMIDI (из DAW сюда).
+      </p>
+      {#if status.midi.extra?.length}
+        <div class="sep"></div>
+        <h3 class="card-title">Свои выходы партий</h3>
+        {#each status.midi.extra as x (x.port)}
+          <p class="hint">{x.port}: {x.error ? x.error : "подключён"}</p>
+        {/each}
+      {/if}
     </section>
 
     <section class="card">

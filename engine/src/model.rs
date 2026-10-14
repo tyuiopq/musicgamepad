@@ -373,6 +373,9 @@ fn is_zero_i32(v: &i32) -> bool {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Part {
     pub name: String,
+    /// Свой MIDI-выход партии (None — основной, из настроек).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<String>,
     /// 0..15 (9 — ударные по стандарту GM).
     pub channel: u8,
     pub program: u8,

@@ -3,7 +3,16 @@
   // меняются только подписи, ширина не прыгает.
   import { api, type Quantize, type TransportSettings, type TransportStatus } from "$lib/api";
 
-  let { transport, run }: { transport: TransportStatus; run: (action: () => Promise<unknown>) => void } = $props();
+  let {
+    transport,
+    run,
+    external = false,
+  }: {
+    transport: TransportStatus;
+    run: (action: () => Promise<unknown>) => void;
+    /** Темп приходит по MIDI Clock от DAW. */
+    external?: boolean;
+  } = $props();
 
   const ts = $derived(transport.settings);
   const looper = $derived(transport.looper);
@@ -97,6 +106,12 @@
             {#each QUANTIZE as [q, text] (q)}<option value={q}>{text}</option>{/each}
           </select>
         </label>
+        <label class="field" style="--label-w: 110px" title="Пока идут часы (метроном, запись, лупер, Play в DAW), нажатия подтягиваются к ближайшей доле сетки">
+          <span class="label">Квантовать игру</span>
+          <select class="select select-sm" value={ts.live_quantize ?? "off"} onchange={(e) => set((s) => (s.live_quantize = e.currentTarget.value as Quantize))}>
+            {#each QUANTIZE as [q, text] (q)}<option value={q}>{text}</option>{/each}
+          </select>
+        </label>
       </div>
     {/if}
   </section>
@@ -113,11 +128,15 @@
       />
     </div>
     <div class="bpm">
-      <button type="button" class="btn btn-sm btn-icon" style="width: 30px" aria-label="Медленнее" onclick={() => setBpm(ts.bpm - 1)}>−</button>
-      <input class="input input-sm" type="number" min="20" max="300" aria-label="Темп" value={ts.bpm} onchange={(e) => setBpm(Number(e.currentTarget.value))} />
-      <button type="button" class="btn btn-sm btn-icon" style="width: 30px" aria-label="Быстрее" onclick={() => setBpm(ts.bpm + 1)}>+</button>
+      <button type="button" class="btn btn-sm btn-icon" style="width: 30px" aria-label="Медленнее" disabled={external} onclick={() => setBpm(ts.bpm - 1)}>−</button>
+      <input class="input input-sm" type="number" min="20" max="300" aria-label="Темп" disabled={external} value={ts.bpm} onchange={(e) => setBpm(Number(e.currentTarget.value))} />
+      <button type="button" class="btn btn-sm btn-icon" style="width: 30px" aria-label="Быстрее" disabled={external} onclick={() => setBpm(ts.bpm + 1)}>+</button>
       <span class="xs muted">BPM</span>
-      <button type="button" class="btn btn-sm" title="Постучи 3–4 раза в темпе" onclick={tap}>Тап</button>
+      {#if external}
+        <span class="chip" title="Темп приходит по MIDI Clock">от DAW</span>
+      {:else}
+        <button type="button" class="btn btn-sm" title="Постучи 3–4 раза в темпе" onclick={tap}>Тап</button>
+      {/if}
     </div>
     <div class="row">
       <select class="select select-sm" aria-label="Размер" value={ts.beats_per_bar} onchange={(e) => set((s) => (s.beats_per_bar = Number(e.currentTarget.value)))}>

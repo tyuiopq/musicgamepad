@@ -1,7 +1,7 @@
 <script lang="ts">
   // Вкладка «Звук»: партии профиля, их инструменты и звучание.
   import { onMount } from "svelte";
-  import { api, type BankEntry, type Input, type Part, type PresetInfo, type Profile, type SamplePad, type Sound } from "$lib/api";
+  import { api, type BankEntry, type Input, type Part, type PresetInfo, type Profile, type SamplePad, type Sound, type MidiStatus } from "$lib/api";
   import { noteName } from "$lib/labels";
   import { setBinding } from "$lib/profileEdit.svelte";
   import { addPart, canAddPart, defaultSound, drumName, hasDrums, isDrums, partUsage, presetName, removePart } from "$lib/sound";
@@ -13,8 +13,11 @@
     onchange,
     onaudition,
     ontest,
+    midi = null,
   }: {
     profile: Profile;
+    /** Состояние MIDI-выходов — показать, подключился ли выход партии. */
+    midi?: MidiStatus | null;
     presets: PresetInfo[];
     onchange: () => void;
     onaudition: (part: number) => void;
@@ -30,8 +33,10 @@
   let banks = $state<BankEntry[]>([]);
   let partPresets = $state<PresetInfo[]>([]);
   let loadError = $state<string | null>(null);
+  let ports = $state<string[]>([]);
   onMount(() => {
     api.soundLibrary().then((b) => (banks = b));
+    api.midiPorts().then((p) => (ports = p));
   });
 
   const source = $derived(part?.source ?? { type: "default" as const });
@@ -266,6 +271,26 @@
       </label>
       {#if profile.parts.some((x, j) => x.channel === part.channel && j !== index)}
         <p class="hint warn">На этом канале уже есть партия: инструменты будут мешать друг другу.</p>
+      {/if}
+      <label class="channel" title="Партию можно отправить в другой порт — например, бас на аппаратный синтезатор, а клавиши в DAW">
+        <span>MIDI-выход</span>
+        <select
+          value={part.port ?? ""}
+          onchange={(e) => {
+            const v = e.currentTarget.value;
+            edit((p) => {
+              if (v) p.port = v;
+              else delete p.port;
+            });
+          }}
+        >
+          <option value="">Основной (из «Настроек»)</option>
+          {#each ports as p (p)}<option value={p}>{p}</option>{/each}
+          {#if part.port && !ports.includes(part.port)}<option value={part.port}>{part.port} — не найден</option>{/if}
+        </select>
+      </label>
+      {#if part.port && midi?.extra?.find((x) => x.port === part.port)?.error}
+        <p class="hint warn">{midi.extra.find((x) => x.port === part.port)?.error}</p>
       {/if}
 
       <div class="source">
