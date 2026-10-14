@@ -6,7 +6,7 @@
   import { effectLabel } from "$lib/describe";
   import { noteName, solfege } from "$lib/labels";
   import { CHORD_DEGREES, degreeNote, scaleSteps } from "$lib/music";
-  import { defaultAction, roleOf, type Role } from "$lib/profileEdit";
+  import { defaultAction, roleOf, type Role } from "$lib/profileEdit.svelte";
   import { drumName, isDrums, presetName } from "$lib/sound";
   import { chordNotes as chordNotesOf, learnMessages as learnOf } from "$lib/learn";
   import ShapeCurve from "./ShapeCurve.svelte";
@@ -275,6 +275,11 @@
     <div class="inherited">
       <span>Из слоя «{inheritedLayer}»</span>
       <button type="button" class="link" onclick={overrideInherited}>Изменить в этом слое</button>
+    </div>
+  {:else if binding && inherited}
+    <div class="inherited">
+      <span>Перекрывает назначение из слоя «{inheritedLayer}»</span>
+      <button type="button" class="link" onclick={() => onchange(null)}>Вернуть как там</button>
     </div>
   {/if}
 

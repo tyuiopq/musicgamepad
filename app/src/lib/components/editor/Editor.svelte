@@ -17,8 +17,9 @@
   } from "$lib/api";
   import { controlOfKey, type ControlId } from "$lib/controls";
   import { keyLabel } from "$lib/labels";
-  import { ROOT_NAMES, SCALE_NAMES } from "$lib/music";
-  import { addLayer, deleteLayer, layerTriggers, setBinding } from "$lib/profileEdit";
+  import { ROOT_NAMES, SCALE_NAMES, scaleSteps } from "$lib/music";
+  import { lintProfile } from "$lib/lint";
+  import { addLayer, deleteLayer, duplicateLayer, layerTriggers, setBinding } from "$lib/profileEdit.svelte";
   import Gamepad from "../Gamepad.svelte";
   import Inspector from "./Inspector.svelte";
   import SoundPanel from "./SoundPanel.svelte";
@@ -29,12 +30,15 @@
     profiles,
     onprofiles,
     ondirty,
+    active = true,
   }: {
     status: Status;
     family: PadFamily;
     profiles: ProfileEntry[];
     onprofiles: () => Promise<void>;
     ondirty: (dirty: boolean) => void;
+    /** Экран профиля открыт — только тогда работают Ctrl+Z / Ctrl+Y. */
+    active?: boolean;
   } = $props();
 
   let draft = $state<Profile | null>(null);
@@ -63,6 +67,92 @@
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   const layer = $derived(draft?.layers.find((l) => l.id === layerId) ?? draft?.layers[0] ?? null);
+
+  // ---------- история правок (Undo / Redo) ----------
+  const HISTORY = 100;
+  /** Правки, сделанные быстрее этого друг за другом (протяжка ползунка), — один шаг. */
+  const GROUP_MS = 600;
+  let undoStack = $state<string[]>([]);
+  let redoStack = $state<string[]>([]);
+  let current = "";
+  let lastEdit = 0;
+
+  function snapshotText(): string {
+    return draft ? JSON.stringify($state.snapshot(draft)) : "";
+  }
+
+  function resetHistory() {
+    undoStack = [];
+    redoStack = [];
+    current = snapshotText();
+    lastEdit = 0;
+  }
+
+  function record() {
+    const snap = snapshotText();
+    if (snap === current) return;
+    const now = Date.now();
+    if (now - lastEdit > GROUP_MS) undoStack = [...undoStack, current].slice(-HISTORY);
+    redoStack = [];
+    current = snap;
+    lastEdit = now;
+  }
+
+  function restore(text: string) {
+    draft = JSON.parse(text);
+    current = text;
+    lastEdit = 0;
+    if (!draft!.layers.some((l) => l.id === layerId)) layerId = "base";
+    dirty = true;
+    clearTimeout(timer);
+    timer = setTimeout(push, 60);
+  }
+
+  function undo() {
+    if (!undoStack.length) return;
+    redoStack = [...redoStack, current];
+    const prev = undoStack[undoStack.length - 1];
+    undoStack = undoStack.slice(0, -1);
+    restore(prev);
+  }
+
+  function redo() {
+    if (!redoStack.length) return;
+    undoStack = [...undoStack, current];
+    const next = redoStack[redoStack.length - 1];
+    redoStack = redoStack.slice(0, -1);
+    restore(next);
+  }
+
+  function onkey(e: KeyboardEvent) {
+    if (!active || !(e.ctrlKey || e.metaKey)) return;
+    const target = e.target as HTMLElement | null;
+    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+    const key = e.key.toLowerCase();
+    if ((key === "z" || key === "я") && !e.shiftKey) {
+      e.preventDefault();
+      undo();
+    } else if (key === "y" || key === "н" || ((key === "z" || key === "я") && e.shiftKey)) {
+      e.preventDefault();
+      redo();
+    }
+  }
+
+  // ---------- проверка раскладки ----------
+  const issues = $derived(draft ? lintProfile(draft, family) : []);
+  const warnCount = $derived(issues.filter((i) => i.level === "warn").length);
+  let showIssues = $state(demoOption("issues") !== null);
+
+  // ---------- свой лад ----------
+  const isCustomScale = $derived(draft?.music.scale.type === "custom");
+  function toggleStep(step: number) {
+    if (!draft || step === 0) return;
+    const steps = new Set(scaleSteps(draft.music));
+    if (steps.has(step)) steps.delete(step);
+    else steps.add(step);
+    draft.music.scale = { type: "custom", steps: [...steps].sort((a, b) => a - b) };
+    changed();
+  }
   const entry = $derived(profiles.find((p) => p.name === savedName) ?? null);
 
   $effect(() => ondirty(dirty));
@@ -75,6 +165,7 @@
     dirty = false;
     confirmDelete = false;
     if (!p.layers.some((l) => l.id === layerId)) layerId = "base";
+    resetHistory();
     await refreshPreview();
   }
 
@@ -90,6 +181,7 @@
 
   /** Что-то поменяли: через мгновение применяем к движку и обновляем схему. */
   function changed() {
+    record();
     dirty = true;
     clearTimeout(timer);
     timer = setTimeout(push, 120);
@@ -142,6 +234,15 @@
     const l = addLayer(draft);
     changed();
     return l.id;
+  }
+
+  function copyLayer(id: string) {
+    if (!draft) return;
+    const l = duplicateLayer(draft, id);
+    if (l) {
+      changed();
+      selectLayer(l.id);
+    }
   }
 
   function removeLayer(id: string) {
@@ -231,6 +332,8 @@
   });
 </script>
 
+<svelte:window onkeydown={onkey} />
+
 {#if !draft || !layer}
   <p class="muted">Загружаю профиль…</p>
 {:else}
@@ -240,7 +343,21 @@
         <input class="name" aria-label="Название профиля" bind:value={draft.name} oninput={changed} maxlength="60" />
         <span class="status" class:dirty>{dirty ? "Не сохранено" : "Сохранено"}</span>
         <span class="spacer"></span>
-        {#if dirty}<button type="button" class="btn btn-ghost" onclick={revert}>Отменить</button>{/if}
+        <div class="row" style="--gap: 2px">
+          <button type="button" class="btn btn-ghost btn-icon history" title="Отменить правку (Ctrl+Z)" aria-label="Отменить правку" disabled={!undoStack.length} onclick={undo}>↶</button>
+          <button type="button" class="btn btn-ghost btn-icon history" title="Вернуть правку (Ctrl+Y)" aria-label="Вернуть правку" disabled={!redoStack.length} onclick={redo}>↷</button>
+        </div>
+        <button
+          type="button"
+          class="btn btn-ghost lint"
+          class:has-warn={warnCount > 0}
+          aria-expanded={showIssues}
+          onclick={() => (showIssues = !showIssues)}
+          title="Проверка раскладки"
+        >
+          {issues.length ? `Замечаний: ${issues.length}` : "✓ Без замечаний"}
+        </button>
+        {#if dirty}<button type="button" class="btn btn-ghost" onclick={revert}>Отменить всё</button>{/if}
         <button type="button" class="btn btn-primary" disabled={!dirty} onclick={save}>Сохранить</button>
         <button type="button" class="btn btn-ghost" onclick={copy} title="Сделать копию профиля и править её">Копия</button>
         {#if entry?.builtin && entry.modified}
@@ -249,6 +366,18 @@
           <button type="button" class="btn btn-danger" onclick={remove}>{confirmDelete ? "Точно удалить?" : "Удалить"}</button>
         {/if}
       </div>
+      {#if showIssues && issues.length}
+        <ul class="issues">
+          {#each issues as issue, i (i)}
+            <li class={issue.level}>
+              <span>{issue.text}</span>
+              {#if issue.layer && issue.layer !== layerId}
+                <button type="button" class="btn-link" onclick={() => ((tab = "buttons"), selectLayer(issue.layer!))}>к слою</button>
+              {/if}
+            </li>
+          {/each}
+        </ul>
+      {/if}
       <div class="toolbar">
         <div class="seg tabs" role="tablist" aria-label="Раздел профиля">
           <button type="button" role="tab" aria-selected={tab === "buttons"} class:on={tab === "buttons"} onclick={() => (tab = "buttons")}>Кнопки</button>
@@ -272,13 +401,16 @@
           <span>Лад</span>
           <select
             class="select select-sm"
-            value={draft.music.scale.type === "preset" ? draft.music.scale.preset : "major"}
+            value={draft.music.scale.type === "preset" ? draft.music.scale.preset : "__custom"}
             onchange={(e) => {
-              draft!.music.scale = { type: "preset", preset: e.currentTarget.value as ScalePreset };
+              const v = e.currentTarget.value;
+              draft!.music.scale =
+                v === "__custom" ? { type: "custom", steps: scaleSteps(draft!.music) } : { type: "preset", preset: v as ScalePreset };
               changed();
             }}
           >
             {#each SCALE_NAMES as [id, name] (id)}<option value={id}>{name}</option>{/each}
+            <option value="__custom">Свой лад…</option>
           </select>
         </label>
         <label class="mini">
@@ -295,6 +427,27 @@
           </select>
         </label>
       </div>
+      {#if isCustomScale}
+        {@const steps = scaleSteps(draft.music)}
+        <div class="custom-scale">
+          <span class="xs muted">Свой лад — отметь звуки от тоники:</span>
+          <div class="steps">
+            {#each Array.from({ length: 12 }, (_, i) => i) as i (i)}
+              <button
+                type="button"
+                class:on={steps.includes(i)}
+                aria-pressed={steps.includes(i)}
+                disabled={i === 0}
+                title={i === 0 ? "Тоника всегда в ладу" : ""}
+                onclick={() => toggleStep(i)}
+              >
+                {ROOT_NAMES[(draft.music.root + i) % 12]}
+              </button>
+            {/each}
+          </div>
+          <span class="xs muted">{steps.length} зв. в октаве</span>
+        </div>
+      {/if}
     </header>
 
     {#if error}<p class="error">{error}</p>{/if}
@@ -313,6 +466,7 @@
               {/each}
               <button type="button" class="add" onclick={() => selectLayer(newLayer())}>+ Слой</button>
             </div>
+            <button type="button" class="btn btn-sm" title="Копия этого слоя со всеми назначениями" onclick={() => copyLayer(layer.id)}>Копировать слой</button>
             <button type="button" class="btn btn-sm" class:listening onclick={() => (listening ? (listening = false) : startListening())}>
               {listening ? "Нажми на геймпаде… (отмена)" : "Назначить с геймпада"}
             </button>
@@ -535,6 +689,73 @@
   }
   .center {
     text-align: center;
+  }
+  .history {
+    font-size: 18px;
+  }
+  .lint {
+    color: var(--muted);
+    font-size: 13px;
+  }
+  .lint.has-warn {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+  .issues {
+    margin: 0;
+    padding: 10px 12px 10px 28px;
+    border-radius: var(--r-md);
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 13px;
+  }
+  .issues li {
+    display: flex;
+    gap: 10px;
+    align-items: baseline;
+    justify-content: space-between;
+  }
+  .issues li.warn {
+    color: var(--text);
+  }
+  .issues li.warn::marker {
+    color: var(--accent);
+  }
+  .issues li.info {
+    color: var(--muted);
+  }
+  .custom-scale {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .steps {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+  .steps button {
+    min-width: 44px;
+    height: 30px;
+    padding: 0 6px;
+    border-radius: var(--r-sm);
+    border: 1px solid var(--line-strong);
+    background: transparent;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .steps button.on {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--text);
+  }
+  .steps button:disabled {
+    cursor: default;
+    opacity: 1;
   }
   .inspect {
     position: sticky;

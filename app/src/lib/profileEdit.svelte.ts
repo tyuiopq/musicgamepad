@@ -83,3 +83,21 @@ export function layerTriggers(profile: Profile, id: string): Binding[] {
     l.bindings.filter((b) => b.action.kind === "modifier" && b.action.effect.type === "layer" && b.action.effect.layer === id),
   );
 }
+
+/** Копия слоя со всеми назначениями — ставится сразу после оригинала. */
+export function duplicateLayer(profile: Profile, id: string): Layer | null {
+  const src = profile.layers.find((l) => l.id === id);
+  if (!src) return null;
+  let n = profile.layers.length;
+  let newId = `layer${n}`;
+  while (profile.layers.some((l) => l.id === newId)) newId = `layer${++n}`;
+  const copy: Layer = {
+    id: newId,
+    name: `${src.id === "base" ? "Слой" : src.name} (копия)`,
+    bindings: structuredClone($state.snapshot(src.bindings)),
+    combo: src.combo ? [...src.combo] : undefined,
+  };
+  const at = profile.layers.findIndex((l) => l.id === id);
+  profile.layers.splice(at + 1, 0, copy);
+  return copy;
+}

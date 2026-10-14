@@ -3,7 +3,7 @@
   import type { Binding, Layer, PadFamily, PresetInfo, Profile } from "$lib/api";
   import { slotsOf, type ControlId } from "$lib/controls";
   import { keyLabel } from "$lib/labels";
-  import { findBinding } from "$lib/profileEdit";
+  import { findBinding } from "$lib/profileEdit.svelte";
   import BindingEditor from "./BindingEditor.svelte";
 
   let {

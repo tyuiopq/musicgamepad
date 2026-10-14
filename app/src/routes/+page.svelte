@@ -75,7 +75,7 @@
 
       <!-- Редактор не уничтожается при уходе с экрана, иначе потерялись бы несохранённые правки -->
       <div class="view" hidden={view !== "edit"}>
-        <Editor {status} {family} {profiles} onprofiles={refreshProfiles} ondirty={(d) => (editorDirty = d)} />
+        <Editor {status} {family} {profiles} onprofiles={refreshProfiles} ondirty={(d) => (editorDirty = d)} active={view === "edit"} />
       </div>
       {#if view === "play"}
         <Play {status} {profile} {family} {run} />

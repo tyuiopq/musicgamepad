@@ -3,7 +3,7 @@
   import { onMount } from "svelte";
   import { api, type BankEntry, type Input, type Part, type PresetInfo, type Profile, type SamplePad, type Sound } from "$lib/api";
   import { noteName } from "$lib/labels";
-  import { setBinding } from "$lib/profileEdit";
+  import { setBinding } from "$lib/profileEdit.svelte";
   import { addPart, canAddPart, defaultSound, drumName, hasDrums, isDrums, partUsage, presetName, removePart } from "$lib/sound";
   import InstrumentBrowser from "./InstrumentBrowser.svelte";
 
