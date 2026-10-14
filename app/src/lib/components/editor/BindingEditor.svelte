@@ -7,6 +7,7 @@
   import { noteName, solfege } from "$lib/labels";
   import { CHORD_DEGREES, degreeNote, scaleSteps } from "$lib/music";
   import { defaultAction, roleOf, type Role } from "$lib/profileEdit";
+  import { drumName, isDrums } from "$lib/sound";
   import ShapeCurve from "./ShapeCurve.svelte";
 
   let {
@@ -182,7 +183,25 @@
         ],
   );
 
-  const bendRange = $derived(profile.parts[0]?.bend_range ?? 2);
+  const actionPart = $derived(action && (action.kind === "note" || action.kind === "control") ? action.part : 0);
+  const bendRange = $derived(profile.parts[actionPart]?.bend_range ?? 2);
+  const drumPart = $derived(isDrums(profile.parts[actionPart]));
+
+  /** Сменить партию; для ударных нота становится конкретной (бочка), т.к. лад им не подходит. */
+  function setPart(i: number) {
+    edit((a) => {
+      if (a.kind !== "note" && a.kind !== "control") return;
+      a.part = i;
+      if (a.kind === "note" && isDrums(profile.parts[i]) && a.note.type !== "absolute") {
+        a.note = { type: "absolute", note: 36 };
+      }
+    });
+  }
+
+  function noteText(n: number): string {
+    const drum = drumPart ? drumName(n) : null;
+    return drum ? `${drum} (${n})` : notePreview(n);
+  }
 </script>
 
 {#snippet stepper(value: number, min: number, max: number, set: (v: number) => void, text: string)}
@@ -221,6 +240,15 @@
 
   {@render seg(ROLES, role, setRole)}
 
+  {#if profile.parts.length > 1 && (action?.kind === "note" || action?.kind === "control")}
+    <label class="part">
+      <span>Партия</span>
+      <select value={actionPart} onchange={(e) => setPart(Number(e.currentTarget.value))}>
+        {#each profile.parts as p, i (i)}<option value={i}>{p.name}</option>{/each}
+      </select>
+    </label>
+  {/if}
+
   {#if action?.kind === "note" && action.note.type !== "chord"}
     {@const note = action.note}
     {@render seg(
@@ -250,9 +278,9 @@
         0,
         127,
         (v) => edit((a) => a.kind === "note" && a.note.type === "absolute" && (a.note.note = v)),
-        notePreview(note.note),
+        noteText(note.note),
       )}
-      <p class="hint">Не зависит от лада — удобно для ударных.</p>
+      <p class="hint">{drumPart ? "Звук ударной установки." : "Не зависит от лада — удобно для ударных."}</p>
     {/if}
     {@render range("Сила", action.velocity, 1, 127, 1, (v) => edit((a) => a.kind === "note" && (a.velocity = v)), String(action.velocity))}
   {:else if action?.kind === "note" && action.note.type === "chord"}
@@ -335,9 +363,34 @@
       (l) => edit((a) => a.kind === "modifier" && (a.latch = l)),
     )}
   {:else if action?.kind === "command"}
-    <select value={action.command.type} onchange={(e) => setCommand(e.currentTarget.value as Command["type"])}>
+    {@const command = action.command}
+    <select value={command.type} onchange={(e) => setCommand(e.currentTarget.value as Command["type"])}>
       {#each COMMANDS as [type, text] (type)}<option value={type}>{text}</option>{/each}
     </select>
+    {#if (command.type === "next_instrument" || command.type === "prev_instrument")}
+      {#if profile.parts.length > 1}
+        <label class="part">
+          <span>Партия</span>
+          <select
+            value={command.part}
+            onchange={(e) => {
+              const i = Number(e.currentTarget.value);
+              edit((a) => {
+                if (a.kind === "command" && (a.command.type === "next_instrument" || a.command.type === "prev_instrument")) a.command.part = i;
+              });
+            }}
+          >
+            {#each profile.parts as p, i (i)}<option value={i}>{p.name}</option>{/each}
+          </select>
+        </label>
+      {/if}
+      {@const list = profile.parts[command.part]?.instruments ?? []}
+      <p class="hint">
+        {list.length
+          ? `По быстрому списку партии: ${list.length} инстр.`
+          : "Быстрый список партии пуст — отметь инструменты звёздочкой во вкладке «Звук»."}
+      </p>
+    {/if}
   {:else if action?.kind === "control"}
     {@const target = action.target}
     {@const shape = action.shape}
@@ -396,6 +449,14 @@
     margin: 0;
     font-size: 14px;
     font-weight: 600;
+  }
+  .part {
+    display: grid;
+    grid-template-columns: 96px 1fr;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--muted);
   }
   .inherited {
     display: flex;

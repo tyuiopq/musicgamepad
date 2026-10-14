@@ -41,6 +41,8 @@ pub enum PadChoice {
 pub struct Settings {
     pub synth_enabled: bool,
     pub audio_mode: AudioMode,
+    /// Общая громкость встроенного синтезатора: 1 — как есть.
+    pub master_volume: f32,
     pub midi_out: Option<String>,
     pub soundfont: Option<PathBuf>,
     pub pad: PadChoice,
@@ -52,6 +54,7 @@ impl Default for Settings {
         Self {
             synth_enabled: true,
             audio_mode: AudioMode::default(),
+            master_volume: 1.0,
             midi_out: None,
             soundfont: None,
             pad: PadChoice::Auto,
@@ -72,6 +75,11 @@ pub enum Command {
     SetPadChoice(PadChoice),
     SetSynthEnabled(bool),
     SetAudioMode(AudioMode),
+    SetMasterVolume(f32),
+    /// Сменить звуковой банк (None — найти банк по умолчанию).
+    SetSoundFont(Option<PathBuf>),
+    /// Сыграть короткую фразу партией, чтобы послушать инструмент.
+    Audition { part: usize },
     SetMidiOut(Option<String>),
     LoadProfile(Box<Profile>),
     ToggleRecord,
@@ -94,6 +102,9 @@ pub struct SynthStatus {
     pub device: Option<String>,
     /// Какой режим выбран и какой реально работает (может откатиться на общий).
     pub requested_mode: AudioMode,
+    pub master_volume: f32,
+    /// Банк выбран пользователем (а не найден по умолчанию).
+    pub custom_soundfont: bool,
     pub mode: Option<AudioMode>,
     /// Почему не включился эксклюзивный режим.
     pub fallback: Option<String>,
@@ -212,6 +223,9 @@ struct Runtime {
     shared: Arc<Mutex<Shared>>,
     settings: Settings,
     recordings_dir: PathBuf,
+    soundfont_dirs: Vec<PathBuf>,
+    /// Отложенные MIDI-сообщения (прослушивание инструмента).
+    scheduled: Vec<(Instant, MidiMsg)>,
     input: Option<GamepadInput>,
     input_error: Option<String>,
     active: Option<u32>,
@@ -238,6 +252,8 @@ impl Runtime {
         let mut rt = Self {
             shared,
             recordings_dir: config.recordings_dir,
+            soundfont_dirs: config.soundfont_dirs.clone(),
+            scheduled: Vec::new(),
             input: None,
             input_error: None,
             active: None,
@@ -258,16 +274,7 @@ impl Runtime {
             settings: config.settings,
         };
 
-        match SoundBank::find(rt.settings.soundfont.as_deref(), &config.soundfont_dirs) {
-            Some(path) => match SoundBank::load(&path) {
-                Ok(bank) => rt.bank = Some(bank),
-                Err(e) => rt.synth_error = Some(format!("Звуковой банк не загрузился: {e}")),
-            },
-            None => rt.synth_error = Some("Звуковой банк (.sf2) не найден".into()),
-        }
-        if let Some(bank) = &rt.bank {
-            rt.shared.lock().unwrap().presets = bank.presets.clone();
-        }
+        rt.load_bank();
         if rt.settings.synth_enabled {
             rt.start_synth();
         }
@@ -301,6 +308,7 @@ impl Runtime {
                 self.on_command(cmd);
             }
             self.check_audio();
+            self.run_scheduled();
             if self.dirty && last_status.elapsed() >= STATUS_INTERVAL {
                 let status = self.status();
                 on_status(&status);
@@ -429,11 +437,31 @@ impl Runtime {
                 }
             }
             Command::LoadProfile(profile) => {
-                self.mapper.panic();
-                self.flush();
-                self.mapper = Mapper::new(*profile);
+                if self.mapper.can_retune(&profile) {
+                    // Поменялось только звучание — не обрываем ноты (ползунки в настройках звука)
+                    self.mapper.retune(*profile);
+                } else {
+                    self.mapper.panic();
+                    self.flush();
+                    self.mapper = Mapper::new(*profile);
+                }
                 self.flush();
             }
+            Command::SetMasterVolume(v) => {
+                self.settings.master_volume = v;
+                if let Some(s) = &self.synth {
+                    s.set_gain(v);
+                }
+            }
+            Command::SetSoundFont(path) => {
+                self.settings.soundfont = path;
+                self.synth = None;
+                self.load_bank();
+                if self.settings.synth_enabled {
+                    self.start_synth();
+                }
+            }
+            Command::Audition { part } => self.audition(part),
             Command::ToggleRecord => self.toggle_record(),
             Command::Panic => {
                 self.mapper.panic();
@@ -520,7 +548,7 @@ impl Runtime {
     fn start_synth(&mut self) {
         let Some(bank) = &self.bank else { return };
         self.last_audio_try = Instant::now();
-        match Synth::start(bank, self.settings.audio_mode) {
+        match Synth::start(bank, self.settings.audio_mode, self.settings.master_volume) {
             Ok(synth) => {
                 self.synth = Some(synth);
                 self.synth_error = None;
@@ -544,6 +572,58 @@ impl Runtime {
         {
             self.start_synth();
             self.dirty = true;
+        }
+    }
+
+    /// Найти и загрузить звуковой банк по настройкам. При ошибке прежний банк остаётся.
+    fn load_bank(&mut self) {
+        let explicit = self.settings.soundfont.clone();
+        match SoundBank::find(explicit.as_deref(), &self.soundfont_dirs) {
+            Some(path) => match SoundBank::load(&path) {
+                Ok(bank) => {
+                    self.shared.lock().unwrap().presets = bank.presets.clone();
+                    self.bank = Some(bank);
+                    self.synth_error = None;
+                }
+                Err(e) => self.synth_error = Some(format!("Звуковой банк не загрузился: {e}")),
+            },
+            None => self.synth_error = Some("Звуковой банк (.sf2) не найден".into()),
+        }
+        if let Some(path) = explicit.filter(|p| !p.is_file()) {
+            self.synth_error = Some(format!("Файл банка не найден: {}", path.display()));
+        }
+    }
+
+    /// Короткая фраза партией: арпеджио по ладу, для ударных — простой бит.
+    fn audition(&mut self, part: usize) {
+        let profile = self.mapper.profile();
+        let Some(p) = profile.parts.get(part) else { return };
+        let notes: Vec<u8> = if p.channel == 9 {
+            vec![36, 42, 38, 42, 36, 36, 38, 46]
+        } else {
+            [0, 2, 4, 7, 4, 2, 0]
+                .iter()
+                .map(|&d| (profile.music.degree_note(d) + p.transpose).clamp(0, 127) as u8)
+                .collect()
+        };
+        let ch = p.channel;
+        let now = Instant::now();
+        for (i, &n) in notes.iter().enumerate() {
+            let on = now + Duration::from_millis(180 * i as u64);
+            self.scheduled.push((on, MidiMsg::note_on(ch, n, 100)));
+            self.scheduled.push((on + Duration::from_millis(160), MidiMsg::note_off(ch, n)));
+        }
+    }
+
+    fn run_scheduled(&mut self) {
+        if self.scheduled.is_empty() {
+            return;
+        }
+        let now = Instant::now();
+        let (due, later): (Vec<_>, Vec<_>) = self.scheduled.drain(..).partition(|(t, _)| *t <= now);
+        self.scheduled = later;
+        for (_, msg) in due {
+            self.dispatch(msg);
         }
     }
 
@@ -607,6 +687,8 @@ impl Runtime {
                 soundfont: self.bank.as_ref().map(|b| b.path.display().to_string()),
                 device: self.synth.as_ref().map(|s| s.device.clone()),
                 requested_mode: self.settings.audio_mode,
+                master_volume: self.settings.master_volume,
+                custom_soundfont: self.settings.soundfont.is_some(),
                 mode: self.synth.as_ref().map(|s| s.mode),
                 fallback: self.synth.as_ref().and_then(|s| s.fallback.clone()),
                 error: self.synth_error.clone(),

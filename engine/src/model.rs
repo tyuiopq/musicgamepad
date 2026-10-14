@@ -257,6 +257,53 @@ pub struct Part {
     /// Инструменты, по которым ходят команды Next/PrevInstrument (номера GM).
     #[serde(default)]
     pub instruments: Vec<u8>,
+    /// Сдвиг всех нот партии в полутонах.
+    #[serde(default)]
+    pub transpose: i32,
+    #[serde(default)]
+    pub sound: Sound,
+}
+
+/// Звучание партии — стандартные MIDI-контроллеры, их понимают и встроенный синтезатор, и DAW.
+/// 64 у атаки, затухания, яркости и резонанса — «как задумано в банке».
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Sound {
+    /// CC10: 0 — лево, 64 — центр, 127 — право.
+    pub pan: u8,
+    /// CC91: посыл на реверберацию.
+    pub reverb: u8,
+    /// CC93: посыл на хорус.
+    pub chorus: u8,
+    /// CC73: время атаки.
+    pub attack: u8,
+    /// CC72: время затухания после отпускания.
+    pub release: u8,
+    /// CC74: яркость (частота среза фильтра).
+    pub brightness: u8,
+    /// CC71: резонанс фильтра.
+    pub resonance: u8,
+}
+
+impl Default for Sound {
+    fn default() -> Self {
+        Self { pan: 64, reverb: 40, chorus: 0, attack: 64, release: 64, brightness: 64, resonance: 64 }
+    }
+}
+
+impl Sound {
+    /// (номер CC, значение) для отправки синтезатору.
+    pub fn controllers(&self) -> [(u8, u8); 7] {
+        [
+            (10, self.pan),
+            (91, self.reverb),
+            (93, self.chorus),
+            (73, self.attack),
+            (72, self.release),
+            (74, self.brightness),
+            (71, self.resonance),
+        ]
+    }
 }
 
 fn default_volume() -> u8 {

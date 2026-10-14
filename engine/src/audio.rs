@@ -99,16 +99,22 @@ fn first_sf2(dir: &Path) -> Option<PathBuf> {
 pub(crate) struct SynthCore {
     synth: Synthesizer,
     rx: Consumer<MidiMsg>,
+    shared: Arc<AudioShared>,
     left: Vec<f32>,
     right: Vec<f32>,
 }
 
 impl SynthCore {
-    pub(crate) fn new(font: &Arc<SoundFont>, sample_rate: u32, rx: Consumer<MidiMsg>) -> anyhow::Result<Self> {
+    pub(crate) fn new(
+        font: &Arc<SoundFont>,
+        sample_rate: u32,
+        rx: Consumer<MidiMsg>,
+        shared: Arc<AudioShared>,
+    ) -> anyhow::Result<Self> {
         let mut settings = SynthesizerSettings::new(sample_rate as i32);
         settings.block_size = SYNTH_BLOCK;
         let synth = Synthesizer::new(font, &settings).map_err(|e| anyhow!("синтезатор: {e:?}"))?;
-        Ok(Self { synth, rx, left: vec![0.0; 4096], right: vec![0.0; 4096] })
+        Ok(Self { synth, rx, shared, left: vec![0.0; 4096], right: vec![0.0; 4096] })
     }
 
     /// Применить пришедший MIDI и посчитать `frames` кадров.
@@ -122,16 +128,36 @@ impl SynthCore {
             self.right.resize(frames, 0.0);
         }
         self.synth.render(&mut self.left[..frames], &mut self.right[..frames]);
+        let gain = self.shared.gain();
+        if gain != 1.0 {
+            self.left[..frames].iter_mut().for_each(|s| *s *= gain);
+            self.right[..frames].iter_mut().for_each(|s| *s *= gain);
+        }
         (&self.left[..frames], &self.right[..frames])
     }
 }
 
 /// Состояние аудиопотока, которое видит движок.
-#[derive(Default)]
 pub(crate) struct AudioShared {
     pub failed: AtomicBool,
     /// Оценка задержки вывода (от синтеза до ЦАП), мкс.
     pub output_latency_us: AtomicU32,
+    /// Общая громкость (биты f32).
+    gain_bits: AtomicU32,
+}
+
+impl AudioShared {
+    pub(crate) fn new(gain: f32) -> Self {
+        Self { failed: AtomicBool::new(false), output_latency_us: AtomicU32::new(0), gain_bits: AtomicU32::new(gain.to_bits()) }
+    }
+
+    pub(crate) fn gain(&self) -> f32 {
+        f32::from_bits(self.gain_bits.load(Ordering::Relaxed))
+    }
+
+    pub(crate) fn set_gain(&self, gain: f32) {
+        self.gain_bits.store(gain.to_bits(), Ordering::Relaxed);
+    }
 }
 
 /// Держит вывод живым; при удалении звук останавливается.
@@ -157,25 +183,25 @@ pub struct Synth {
 
 impl Synth {
     /// Запускает вывод в режиме `mode`. Если эксклюзивный не удался — откатывается на общий.
-    pub fn start(bank: &SoundBank, mode: AudioMode) -> anyhow::Result<Self> {
+    pub fn start(bank: &SoundBank, mode: AudioMode, gain: f32) -> anyhow::Result<Self> {
         #[cfg(windows)]
         if mode == AudioMode::Exclusive {
-            match Self::start_exclusive(bank) {
+            match Self::start_exclusive(bank, gain) {
                 Ok(s) => return Ok(s),
                 Err(e) => {
-                    let mut s = Self::start_shared(bank)?;
+                    let mut s = Self::start_shared(bank, gain)?;
                     s.fallback = Some(e.to_string());
                     return Ok(s);
                 }
             }
         }
-        Self::start_shared(bank)
+        Self::start_shared(bank, gain)
     }
 
     #[cfg(windows)]
-    fn start_exclusive(bank: &SoundBank) -> anyhow::Result<Self> {
+    fn start_exclusive(bank: &SoundBank, gain: f32) -> anyhow::Result<Self> {
         let (tx, rx) = RingBuffer::<MidiMsg>::new(4096);
-        let shared = Arc::new(AudioShared::default());
+        let shared = Arc::new(AudioShared::new(gain));
         let (out, info) = crate::audio_exclusive::ExclusiveOutput::start(bank.font.clone(), rx, shared.clone())?;
         Ok(Self {
             _backend: Backend::Exclusive(out),
@@ -189,7 +215,7 @@ impl Synth {
         })
     }
 
-    fn start_shared(bank: &SoundBank) -> anyhow::Result<Self> {
+    fn start_shared(bank: &SoundBank, gain: f32) -> anyhow::Result<Self> {
         let host = cpal::default_host();
         let device = host.default_output_device().ok_or_else(|| anyhow!("нет устройства вывода звука"))?;
         let device_name = device.description().map(|d| d.name().to_string()).unwrap_or_else(|_| "Звук".into());
@@ -214,8 +240,8 @@ impl Synth {
         let sample_rate = config.sample_rate;
 
         let (tx, rx) = RingBuffer::<MidiMsg>::new(4096);
-        let mut core = SynthCore::new(&bank.font, sample_rate, rx)?;
-        let shared = Arc::new(AudioShared::default());
+        let shared = Arc::new(AudioShared::new(gain));
+        let mut core = SynthCore::new(&bank.font, sample_rate, rx, shared.clone())?;
         let cb_shared = shared.clone();
         let err_shared = shared.clone();
 
@@ -254,6 +280,11 @@ impl Synth {
 
     pub fn send(&mut self, msg: MidiMsg) {
         let _ = self.tx.push(msg);
+    }
+
+    /// Общая громкость: 1 — как есть.
+    pub fn set_gain(&self, gain: f32) {
+        self.shared.set_gain(gain);
     }
 
     /// Поток звука сломался (например, устройство отключили) — нужно пересоздать.

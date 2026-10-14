@@ -49,7 +49,7 @@
       Игра
     </button>
     <button type="button" role="tab" aria-selected={view === "edit"} class:on={view === "edit"} onclick={() => onview("edit")}>
-      Раскладка{#if editorDirty}<span class="dirty" title="Есть несохранённые изменения">•</span>{/if}
+      Профиль{#if editorDirty}<span class="dirty" title="Есть несохранённые изменения">•</span>{/if}
     </button>
   </div>
 
@@ -98,7 +98,7 @@
     <select
       value={status.profile}
       disabled={editorDirty}
-      title={editorDirty ? "Сначала сохрани или отмени правки в раскладке" : ""}
+      title={editorDirty ? "Сначала сохрани или отмени правки профиля" : ""}
       onchange={(e) => run(() => api.selectProfile(e.currentTarget.value))}
     >
       {#each profiles as p (p.name)}
@@ -153,9 +153,29 @@
       <button class="icon" aria-label="Обновить список MIDI-портов" onclick={() => run(refreshPorts)}>↻</button>
     </div>
     {#if status.midi.error}<p class="error">{status.midi.error}</p>{/if}
-    <p class="muted small" title={status.synth.soundfont ?? ""}>
-      {fileName(status.synth.soundfont) ?? "банк не найден"}
-    </p>
+    {#if status.synth.enabled}
+      <label class="volume">
+        <span class="muted">Громкость</span>
+        <input
+          type="range"
+          min="0"
+          max="2"
+          step="0.05"
+          value={status.synth.master_volume}
+          oninput={(e) => run(() => api.setMasterVolume(Number(e.currentTarget.value)))}
+        />
+        <b>{Math.round(status.synth.master_volume * 100)}%</b>
+      </label>
+    {/if}
+    <div class="bank">
+      <span class="muted small" title={status.synth.soundfont ?? ""}>
+        Банк: {fileName(status.synth.soundfont) ?? "не найден"}
+      </span>
+      <button type="button" class="link small" onclick={() => run(api.chooseSoundfont)}>Сменить…</button>
+      {#if status.synth.custom_soundfont}
+        <button type="button" class="link small" onclick={() => run(api.resetSoundfont)}>По умолчанию</button>
+      {/if}
+    </div>
   </section>
 
   <div class="spacer"></div>
@@ -292,6 +312,36 @@
   }
   .spacer {
     flex: 1;
+  }
+  .volume {
+    display: grid;
+    grid-template-columns: auto 1fr 44px;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+  }
+  .volume input {
+    accent-color: var(--accent);
+    min-width: 0;
+  }
+  .volume b {
+    text-align: right;
+    font-weight: 600;
+  }
+  .bank {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 10px;
+  }
+  .bank span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+  }
+  .bank .link {
+    color: var(--mod);
   }
   .latency {
     margin: 0;

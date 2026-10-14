@@ -19,6 +19,7 @@ fn main() {
         "music": m.profile().music,
         "profile": m.profile(),
         "chords": m.preview_layer("chords"),
+        "presets": engine::audio::SoundBank::find(None, &[]).and_then(|p| engine::audio::SoundBank::load(&p).ok()).map(|b| b.presets).unwrap_or_default(),
     });
     println!("{}", serde_json::to_string_pretty(&out).unwrap());
 }

@@ -242,8 +242,8 @@ impl Mapper {
                 }
                 seen.push(key);
                 let role = match &b.action {
-                    Action::Note { note, .. } => Role::Note {
-                        notes: self.notes_for(*note),
+                    Action::Note { note, part, .. } => Role::Note {
+                        notes: self.notes_for(*note, *part),
                         chord: matches!(note, NoteSpec::Chord { .. }),
                     },
                     Action::Modifier { effect, latch } => Role::Modifier {
@@ -291,7 +291,7 @@ impl Mapper {
             Some(Action::Note { note, part, velocity }) => {
                 let ch = self.profile.parts[part].channel;
                 let vel = self.velocity(velocity);
-                let notes: Vec<(u8, u8)> = self.notes_for(note).into_iter().map(|n| (ch, n)).collect();
+                let notes: Vec<(u8, u8)> = self.notes_for(note, part).into_iter().map(|n| (ch, n)).collect();
                 for &(ch, n) in &notes {
                     let count = self.sounding.entry((ch, n)).or_insert(0);
                     *count += 1;
@@ -431,8 +431,8 @@ impl Mapper {
 
     // ---------- ноты ----------
 
-    fn notes_for(&self, spec: NoteSpec) -> Vec<u8> {
-        let mut semis = 0;
+    fn notes_for(&self, spec: NoteSpec, part: usize) -> Vec<u8> {
+        let mut semis = self.profile.parts.get(part).map_or(0, |p| p.transpose);
         let mut degrees = 0;
         for e in self.effects() {
             match e {
@@ -525,8 +525,37 @@ impl Mapper {
             v.push(MidiMsg::program(p.channel, p.program));
             v.push(MidiMsg::cc(p.channel, 7, p.volume));
             v.extend(midi::bend_range(p.channel, p.bend_range));
+            for (cc, value) in p.sound.controllers() {
+                v.push(MidiMsg::cc(p.channel, cc, value));
+            }
         }
         v
+    }
+
+    /// Можно ли применить `next` без сброса: поменялось только звучание (партии и имя).
+    pub fn can_retune(&self, next: &Profile) -> bool {
+        let cur = &self.profile;
+        cur.layers == next.layers
+            && cur.music == next.music
+            && cur.parts.len() == next.parts.len()
+            && cur.parts.iter().zip(&next.parts).all(|(a, b)| a.channel == b.channel && a.transpose == b.transpose)
+    }
+
+    /// Применить новое звучание, не обрывая ноты (см. `can_retune`).
+    pub fn retune(&mut self, next: Profile) {
+        self.profile = next;
+        for msg in self.setup_messages() {
+            self.emit(msg);
+        }
+        // Вернуть то, что сейчас задают оси (настройка звука могла перекрыть, например, яркость)
+        let controls: Vec<MidiMsg> = self
+            .controls
+            .iter()
+            .map(|(&(ch, key), &val)| if key == BEND_KEY { MidiMsg::bend(ch, val as u16) } else { MidiMsg::cc(ch, key as u8, val as u8) })
+            .collect();
+        for msg in controls {
+            self.emit(msg);
+        }
     }
 
     fn emit(&mut self, msg: MidiMsg) {
@@ -769,6 +798,37 @@ mod tests {
         let lb = chords.iter().find(|v| v.input == Input::Button { button: Button::LeftShoulder }).unwrap();
         assert_eq!(lb.layer, "base");
         assert!(m.preview_layer("nope").is_none());
+    }
+
+    #[test]
+    fn part_transpose_and_sound_setup() {
+        let mut p = classic();
+        p.parts[0].transpose = -12;
+        p.parts[0].sound.brightness = 20;
+        let mut m = Mapper::new(p);
+        assert!(midi(&mut m).contains(&MidiMsg::cc(0, 74, 20)));
+        btn(&mut m, Button::South, true);
+        assert_eq!(notes_on(&mut m), [57]);
+    }
+
+    #[test]
+    fn retune_keeps_sounding_notes() {
+        let mut m = fresh();
+        btn(&mut m, Button::South, true);
+        m.drain();
+        let mut next = classic();
+        next.parts[0].sound.reverb = 100;
+        next.parts[0].program = 40;
+        assert!(m.can_retune(&next));
+        m.retune(next);
+        let msgs = midi(&mut m);
+        assert!(msgs.contains(&MidiMsg::cc(0, 91, 100)));
+        assert!(msgs.contains(&MidiMsg::program(0, 40)));
+        assert!(!msgs.iter().any(|x| x.status() == 0x80 || x.bytes[1] == 123), "ноты не обрываются");
+        assert_eq!(m.sounding_notes(), [69]);
+        let mut other = classic();
+        other.music.root = 2;
+        assert!(!m.can_retune(&other), "смена лада — полная перезагрузка");
     }
 
     #[test]

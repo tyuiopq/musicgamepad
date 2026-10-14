@@ -120,6 +120,17 @@ export interface Layer {
   bindings: Binding[];
 }
 
+/** Звучание партии: стандартные MIDI-контроллеры, 64 — «как в банке» (кроме панорамы и посылов). */
+export interface Sound {
+  pan: number;
+  reverb: number;
+  chorus: number;
+  attack: number;
+  release: number;
+  brightness: number;
+  resonance: number;
+}
+
 export interface Part {
   name: string;
   channel: number;
@@ -128,6 +139,14 @@ export interface Part {
   volume: number;
   bend_range: number;
   instruments: number[];
+  transpose: number;
+  sound: Sound;
+}
+
+export interface PresetInfo {
+  bank: number;
+  program: number;
+  name: string;
 }
 
 export interface Profile {
@@ -168,6 +187,8 @@ export interface Status {
     soundfont: string | null;
     device: string | null;
     requested_mode: AudioMode;
+    master_volume: number;
+    custom_soundfont: boolean;
     mode: AudioMode | null;
     fallback: string | null;
     error: string | null;
@@ -209,6 +230,11 @@ export const api = {
   setPadChoice: (choice: PadChoice) => invoke<void>("set_pad_choice", { choice }),
   setSynthEnabled: (enabled: boolean) => invoke<void>("set_synth_enabled", { enabled }),
   setAudioMode: (mode: AudioMode) => invoke<void>("set_audio_mode", { mode }),
+  setMasterVolume: (volume: number) => invoke<void>("set_master_volume", { volume }),
+  chooseSoundfont: () => invoke<string | null>("choose_soundfont"),
+  resetSoundfont: () => invoke<void>("reset_soundfont"),
+  presets: () => invoke<PresetInfo[]>("get_presets"),
+  audition: (part: number) => invoke<void>("audition", { part }),
   setMidiOut: (port: string | null) => invoke<void>("set_midi_out", { port }),
   toggleRecord: () => invoke<void>("toggle_record"),
   panic: () => invoke<void>("panic"),

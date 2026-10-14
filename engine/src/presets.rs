@@ -81,6 +81,8 @@ pub fn classic() -> Profile {
             volume: 100,
             bend_range: 2,
             instruments: vec![0, 11, 24, 40, 56, 73, 79, 80],
+            transpose: 0,
+            sound: Sound::default(),
         }],
         layers: vec![
             Layer { id: "base".into(), name: "Основной".into(), bindings: base },

@@ -2,13 +2,26 @@
   // Экран «Раскладка»: правка профиля. Правки сразу применяются к движку (их слышно),
   // а на диск попадают по кнопке «Сохранить».
   import { onMount } from "svelte";
-  import { api, demoOption, type Binding, type ControlView, type Input, type PadFamily, type Profile, type ProfileEntry, type ScalePreset, type Status } from "$lib/api";
+  import {
+    api,
+    demoOption,
+    type Binding,
+    type ControlView,
+    type Input,
+    type PadFamily,
+    type PresetInfo,
+    type Profile,
+    type ProfileEntry,
+    type ScalePreset,
+    type Status,
+  } from "$lib/api";
   import { controlOfKey, type ControlId } from "$lib/controls";
   import { keyLabel } from "$lib/labels";
   import { ROOT_NAMES, SCALE_NAMES } from "$lib/music";
   import { addLayer, deleteLayer, layerTriggers, setBinding } from "$lib/profileEdit";
   import Gamepad from "../Gamepad.svelte";
   import Inspector from "./Inspector.svelte";
+  import SoundPanel from "./SoundPanel.svelte";
 
   let {
     status,
@@ -45,6 +58,8 @@
   let preview = $state<ControlView[]>([]);
   let error = $state<string | null>(null);
   let confirmDelete = $state(false);
+  let tab = $state<"buttons" | "sound">(demoOption("tab") === "sound" ? "sound" : "buttons");
+  let presets = $state<PresetInfo[]>([]);
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   const layer = $derived(draft?.layers.find((l) => l.id === layerId) ?? draft?.layers[0] ?? null);
@@ -77,17 +92,29 @@
   function changed() {
     dirty = true;
     clearTimeout(timer);
-    timer = setTimeout(async () => {
-      if (!draft) return;
-      const snap = $state.snapshot(draft) as Profile;
-      try {
-        await api.applyProfile(snap);
-        preview = await api.previewProfile(snap, layerId);
-        error = null;
-      } catch (e) {
-        error = String(e);
-      }
-    }, 120);
+    timer = setTimeout(push, 120);
+  }
+
+  async function push() {
+    timer = undefined;
+    if (!draft) return;
+    const snap = $state.snapshot(draft) as Profile;
+    try {
+      await api.applyProfile(snap);
+      preview = await api.previewProfile(snap, layerId);
+      error = null;
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  /** Послушать партию — сначала применить свежие правки, чтобы звучала новая настройка. */
+  async function audition(part: number) {
+    if (timer) {
+      clearTimeout(timer);
+      await push();
+    }
+    await api.audition(part);
   }
 
   function selectLayer(id: string) {
@@ -190,6 +217,7 @@
 
   onMount(() => {
     load();
+    api.presets().then((p) => (presets = p));
     return () => clearTimeout(timer);
   });
 </script>
@@ -264,6 +292,18 @@
       </label>
     </div>
 
+    <div class="tabs" role="tablist" aria-label="Раздел профиля">
+      <button type="button" role="tab" aria-selected={tab === "buttons"} class:on={tab === "buttons"} onclick={() => (tab = "buttons")}>
+        Кнопки
+      </button>
+      <button type="button" role="tab" aria-selected={tab === "sound"} class:on={tab === "sound"} onclick={() => (tab = "sound")}>
+        Звук
+      </button>
+    </div>
+
+    {#if tab === "sound"}
+      <SoundPanel profile={draft} {presets} onchange={changed} onaudition={audition} />
+    {:else}
     <nav class="layers" aria-label="Слои раскладки">
       {#each draft.layers as l (l.id)}
         <button type="button" class:on={l.id === layerId} aria-pressed={l.id === layerId} onclick={() => selectLayer(l.id)}>
@@ -320,6 +360,7 @@
         {/if}
       </aside>
     </div>
+    {/if}
   </div>
 {/if}
 
@@ -390,6 +431,26 @@
   }
   button.danger {
     color: var(--error);
+  }
+  .tabs {
+    display: flex;
+    gap: 4px;
+    padding: 4px;
+    border-radius: 12px;
+    background: var(--panel);
+    align-self: flex-start;
+  }
+  .tabs button {
+    min-height: 36px;
+    padding: 0 18px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--muted);
+  }
+  .tabs button.on {
+    background: var(--key);
+    color: var(--text);
   }
   .music {
     display: flex;

@@ -98,7 +98,7 @@ fn run(
             return;
         }
     };
-    let mut core = match SynthCore::new(&font, info.sample_rate, rx) {
+    let mut core = match SynthCore::new(&font, info.sample_rate, rx, shared.clone()) {
         Ok(c) => c,
         Err(e) => {
             let _ = init_tx.send(Err(e));

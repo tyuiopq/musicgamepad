@@ -29,6 +29,8 @@ function baseStatus(): Status {
       soundfont: "C:\\assets\\GeneralUser-GS.sf2",
       device: "Динамики",
       requested_mode: "exclusive",
+      master_volume: 1,
+      custom_soundfont: false,
       mode: "exclusive",
       fallback: null,
       error: null,
@@ -73,6 +75,7 @@ export const demo: Record<string, (args?: Record<string, unknown>) => unknown> =
   list_midi_ports: () => ["loopMIDI Port", "Microsoft GS Wavetable Synth"],
   preview_profile: (args) => (args?.layer === "chords" ? scene.chords : scene.controls),
   apply_profile: () => undefined,
+  get_presets: () => scene.presets,
   save_profile: () => undefined,
   toggle_record: () => {
     status = { ...status, recording: !status.recording };

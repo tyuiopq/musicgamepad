@@ -11,6 +11,7 @@ use engine::model::Profile;
 use engine::{presets, AudioMode, Command, Engine, EngineConfig, PadChoice, Settings, Status};
 use profiles::{validated, ProfileEntry, ProfileStore};
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
 struct AppState {
@@ -81,6 +82,38 @@ fn set_synth_enabled(state: State<AppState>, enabled: bool) {
 fn set_audio_mode(state: State<AppState>, mode: AudioMode) {
     state.update_settings(|s| s.audio_mode = mode);
     state.engine.send(Command::SetAudioMode(mode));
+}
+
+#[tauri::command]
+fn set_master_volume(state: State<AppState>, volume: f32) {
+    let volume = volume.clamp(0.0, 2.0);
+    state.update_settings(|s| s.master_volume = volume);
+    state.engine.send(Command::SetMasterVolume(volume));
+}
+
+/// Выбрать свой звуковой банк (.sf2). Возвращает путь или None, если окно закрыли.
+/// Асинхронная: системное окно выбора файла нельзя открывать из главного потока команд.
+#[tauri::command]
+async fn choose_soundfont(app: AppHandle) -> Option<String> {
+    let file = app.dialog().file().add_filter("Звуковой банк SoundFont", &["sf2"]).blocking_pick_file()?;
+    let path = file.into_path().ok()?;
+    let state = app.state::<AppState>();
+    state.update_settings(|s| s.soundfont = Some(path.clone()));
+    state.engine.send(Command::SetSoundFont(Some(path.clone())));
+    Some(path.display().to_string())
+}
+
+/// Вернуться к банку по умолчанию.
+#[tauri::command]
+fn reset_soundfont(state: State<AppState>) {
+    state.update_settings(|s| s.soundfont = None);
+    state.engine.send(Command::SetSoundFont(None));
+}
+
+/// Послушать инструмент партии короткой фразой.
+#[tauri::command]
+fn audition(state: State<AppState>, part: usize) {
+    state.engine.send(Command::Audition { part });
 }
 
 #[tauri::command]
@@ -206,6 +239,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(setup)
         .invoke_handler(tauri::generate_handler![
             get_status,
@@ -216,6 +250,10 @@ pub fn run() {
             set_synth_enabled,
             set_audio_mode,
             set_midi_out,
+            set_master_volume,
+            choose_soundfont,
+            reset_soundfont,
+            audition,
             list_profiles,
             get_profile,
             select_profile,
