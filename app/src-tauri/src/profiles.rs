@@ -15,6 +15,10 @@ pub struct ProfileEntry {
     pub builtin: bool,
     /// Встроенный профиль изменён пользователем (его можно вернуть к заводскому).
     pub modified: bool,
+    /// Раздел библиотеки: builtin, daw, synth или mine.
+    pub category: String,
+    pub target: String,
+    pub description: String,
 }
 
 pub struct ProfileStore {
@@ -22,7 +26,7 @@ pub struct ProfileStore {
 }
 
 fn builtin() -> Vec<Profile> {
-    vec![presets::classic()]
+    presets::library()
 }
 
 pub fn validated(profile: &Profile) -> Result<(), String> {
@@ -61,19 +65,17 @@ impl ProfileStore {
     pub fn list(&self) -> Vec<ProfileEntry> {
         let user: Vec<Profile> = self.user_files().into_iter().map(|(_, p)| p).collect();
         let builtin = builtin();
-        let mut v: Vec<ProfileEntry> = builtin
-            .iter()
-            .map(|b| ProfileEntry {
-                name: b.name.clone(),
-                builtin: true,
-                modified: user.iter().any(|u| u.name == b.name),
-            })
-            .collect();
-        v.extend(
-            user.into_iter()
-                .filter(|u| !builtin.iter().any(|b| b.name == u.name))
-                .map(|p| ProfileEntry { name: p.name, builtin: false, modified: false }),
-        );
+        let entry = |p: &Profile, builtin: bool, modified: bool| ProfileEntry {
+            name: p.name.clone(),
+            builtin,
+            modified,
+            category: if builtin { p.meta.category.clone() } else { "mine".into() },
+            target: p.meta.target.clone(),
+            description: p.meta.description.clone(),
+        };
+        let mut v: Vec<ProfileEntry> =
+            builtin.iter().map(|b| entry(b, true, user.iter().any(|u| u.name == b.name))).collect();
+        v.extend(user.iter().filter(|u| !builtin.iter().any(|b| b.name == u.name)).map(|p| entry(p, false, false)));
         v
     }
 
@@ -105,6 +107,15 @@ impl ProfileStore {
             let _ = std::fs::remove_file(old_path);
         }
         Ok(())
+    }
+
+    /// Свободное имя для импортируемого профиля: «Имя», «Имя (2)», «Имя (3)»…
+    pub fn free_name(&self, name: &str) -> String {
+        let base = if name.trim().is_empty() { "Профиль" } else { name.trim() };
+        if self.find(base).is_none() {
+            return base.to_string();
+        }
+        (2..).map(|i| format!("{base} ({i})")).find(|n| self.find(n).is_none()).expect("бесконечный ряд")
     }
 
     /// Удаляет файл пользователя (для изменённого встроенного это «вернуть заводской»).
@@ -140,7 +151,8 @@ mod tests {
         let mut p = presets::classic();
         p.music.root = 9;
         s.save(&p, Some("Классика")).unwrap();
-        assert_eq!(s.list(), [ProfileEntry { name: "Классика".into(), builtin: true, modified: true }]);
+        let classic = s.list().into_iter().find(|e| e.name == "Классика").unwrap();
+        assert!(classic.builtin && classic.modified);
         assert_eq!(s.find("Классика").unwrap().music.root, 9);
         s.delete("Классика").unwrap();
         assert_eq!(s.find("Классика").unwrap().music.root, 0, "вернулся заводской");
@@ -172,6 +184,16 @@ mod tests {
         assert!(s.save(&named("А"), None).is_err(), "копия с занятым именем");
         assert!(s.save(&named("Классика"), Some("А")).is_err(), "имя встроенного занято");
         assert!(s.find("Б").is_some());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn free_name_for_import() {
+        let (s, dir) = store("free");
+        assert_eq!(s.free_name("Новый"), "Новый");
+        assert_eq!(s.free_name("Классика"), "Классика (2)");
+        s.save(&named("Классика (2)"), None).unwrap();
+        assert_eq!(s.free_name("Классика"), "Классика (3)");
         let _ = std::fs::remove_dir_all(dir);
     }
 

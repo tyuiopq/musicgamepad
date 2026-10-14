@@ -1,4 +1,611 @@
 {
+  "ableton": {
+    "layers": [
+      {
+        "bindings": [
+          {
+            "action": {
+              "kind": "note",
+              "latch": "hold",
+              "note": {
+                "degree": 0,
+                "type": "degree"
+              },
+              "part": 0,
+              "velocity": 100
+            },
+            "input": {
+              "button": "dpad_left",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "kind": "note",
+              "latch": "hold",
+              "note": {
+                "degree": 1,
+                "type": "degree"
+              },
+              "part": 0,
+              "velocity": 100
+            },
+            "input": {
+              "button": "dpad_down",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "kind": "note",
+              "latch": "hold",
+              "note": {
+                "degree": 2,
+                "type": "degree"
+              },
+              "part": 0,
+              "velocity": 100
+            },
+            "input": {
+              "button": "dpad_right",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "kind": "note",
+              "latch": "hold",
+              "note": {
+                "degree": 3,
+                "type": "degree"
+              },
+              "part": 0,
+              "velocity": 100
+            },
+            "input": {
+              "button": "dpad_up",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "kind": "note",
+              "latch": "hold",
+              "note": {
+                "degree": 4,
+                "type": "degree"
+              },
+              "part": 0,
+              "velocity": 100
+            },
+            "input": {
+              "button": "west",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "kind": "note",
+              "latch": "hold",
+              "note": {
+                "degree": 5,
+                "type": "degree"
+              },
+              "part": 0,
+              "velocity": 100
+            },
+            "input": {
+              "button": "south",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "kind": "note",
+              "latch": "hold",
+              "note": {
+                "degree": 6,
+                "type": "degree"
+              },
+              "part": 0,
+              "velocity": 100
+            },
+            "input": {
+              "button": "east",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "kind": "note",
+              "latch": "hold",
+              "note": {
+                "degree": 7,
+                "type": "degree"
+              },
+              "part": 0,
+              "velocity": 100
+            },
+            "input": {
+              "button": "north",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "effect": {
+                "octaves": -1,
+                "type": "octaves"
+              },
+              "kind": "modifier",
+              "latch": "hold"
+            },
+            "input": {
+              "button": "left_shoulder",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "effect": {
+                "octaves": 1,
+                "type": "octaves"
+              },
+              "kind": "modifier",
+              "latch": "hold"
+            },
+            "input": {
+              "button": "right_shoulder",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "effect": {
+                "type": "sustain"
+              },
+              "kind": "modifier",
+              "latch": "hold"
+            },
+            "input": {
+              "axis": "left_trigger",
+              "direction": "positive",
+              "kind": "axis_switch",
+              "threshold": 0.5
+            }
+          },
+          {
+            "action": {
+              "effect": {
+                "layer": "chords",
+                "type": "layer"
+              },
+              "kind": "modifier",
+              "latch": "toggle"
+            },
+            "input": {
+              "button": "right_stick",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "kind": "control",
+              "part": 0,
+              "relative": false,
+              "shape": {
+                "curve": 1.0,
+                "deadzone": 0.019999999552965164,
+                "invert": false,
+                "mode": "positive",
+                "smoothing": 0.0
+              },
+              "takeover": false,
+              "target": {
+                "max": 127,
+                "min": 40,
+                "type": "velocity"
+              }
+            },
+            "input": {
+              "axis": "right_trigger",
+              "kind": "axis"
+            }
+          },
+          {
+            "action": {
+              "kind": "control",
+              "part": 0,
+              "relative": false,
+              "shape": {
+                "curve": 1.0,
+                "deadzone": 0.15000000596046448,
+                "invert": false,
+                "mode": "bipolar",
+                "smoothing": 0.0
+              },
+              "takeover": false,
+              "target": {
+                "type": "pitch_bend"
+              }
+            },
+            "input": {
+              "axis": "right_x",
+              "kind": "axis"
+            }
+          },
+          {
+            "action": {
+              "kind": "control",
+              "part": 0,
+              "relative": false,
+              "shape": {
+                "curve": 1.0,
+                "deadzone": 0.15000000596046448,
+                "invert": false,
+                "mode": "absolute",
+                "smoothing": 0.0
+              },
+              "takeover": false,
+              "target": {
+                "cc": 1,
+                "max": 127,
+                "min": 0,
+                "type": "cc"
+              }
+            },
+            "input": {
+              "axis": "right_y",
+              "kind": "axis"
+            }
+          },
+          {
+            "action": {
+              "kind": "control",
+              "part": 0,
+              "relative": false,
+              "shape": {
+                "curve": 1.0,
+                "deadzone": 0.15000000596046448,
+                "invert": false,
+                "mode": "bipolar",
+                "smoothing": 20.0
+              },
+              "takeover": true,
+              "target": {
+                "cc": 74,
+                "max": 127,
+                "min": 0,
+                "type": "cc"
+              }
+            },
+            "input": {
+              "axis": "left_x",
+              "kind": "axis"
+            }
+          },
+          {
+            "action": {
+              "kind": "control",
+              "part": 0,
+              "relative": false,
+              "shape": {
+                "curve": 1.0,
+                "deadzone": 0.15000000596046448,
+                "invert": false,
+                "mode": "bipolar",
+                "smoothing": 20.0
+              },
+              "takeover": true,
+              "target": {
+                "cc": 71,
+                "max": 127,
+                "min": 0,
+                "type": "cc"
+              }
+            },
+            "input": {
+              "axis": "left_y",
+              "kind": "axis"
+            }
+          },
+          {
+            "action": {
+              "cc": 85,
+              "kind": "cc",
+              "latch": "hold",
+              "off": 0,
+              "on": 127,
+              "part": 0,
+              "step": 0
+            },
+            "input": {
+              "button": "back",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "cc": 86,
+              "kind": "cc",
+              "latch": "hold",
+              "off": 0,
+              "on": 127,
+              "part": 0,
+              "step": 0
+            },
+            "input": {
+              "button": "start",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "cc": 87,
+              "kind": "cc",
+              "latch": "toggle",
+              "off": 0,
+              "on": 127,
+              "part": 0,
+              "step": 0
+            },
+            "input": {
+              "button": "left_stick",
+              "kind": "button"
+            }
+          }
+        ],
+        "id": "base",
+        "name": "Основной"
+      },
+      {
+        "bindings": [
+          {
+            "action": {
+              "kind": "note",
+              "latch": "hold",
+              "note": {
+                "bass": false,
+                "chord": "triad",
+                "degree": 0,
+                "inversion": 0,
+                "open": false,
+                "type": "chord"
+              },
+              "part": 0,
+              "velocity": 90
+            },
+            "input": {
+              "button": "dpad_left",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "kind": "note",
+              "latch": "hold",
+              "note": {
+                "bass": false,
+                "chord": "triad",
+                "degree": 1,
+                "inversion": 0,
+                "open": false,
+                "type": "chord"
+              },
+              "part": 0,
+              "velocity": 90
+            },
+            "input": {
+              "button": "dpad_down",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "kind": "note",
+              "latch": "hold",
+              "note": {
+                "bass": false,
+                "chord": "triad",
+                "degree": 2,
+                "inversion": 0,
+                "open": false,
+                "type": "chord"
+              },
+              "part": 0,
+              "velocity": 90
+            },
+            "input": {
+              "button": "dpad_right",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "kind": "note",
+              "latch": "hold",
+              "note": {
+                "bass": false,
+                "chord": "triad",
+                "degree": 3,
+                "inversion": 0,
+                "open": false,
+                "type": "chord"
+              },
+              "part": 0,
+              "velocity": 90
+            },
+            "input": {
+              "button": "dpad_up",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "kind": "note",
+              "latch": "hold",
+              "note": {
+                "bass": false,
+                "chord": "triad",
+                "degree": 4,
+                "inversion": 0,
+                "open": false,
+                "type": "chord"
+              },
+              "part": 0,
+              "velocity": 90
+            },
+            "input": {
+              "button": "west",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "kind": "note",
+              "latch": "hold",
+              "note": {
+                "bass": false,
+                "chord": "triad",
+                "degree": 5,
+                "inversion": 0,
+                "open": false,
+                "type": "chord"
+              },
+              "part": 0,
+              "velocity": 90
+            },
+            "input": {
+              "button": "south",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "kind": "note",
+              "latch": "hold",
+              "note": {
+                "bass": false,
+                "chord": "triad",
+                "degree": 6,
+                "inversion": 0,
+                "open": false,
+                "type": "chord"
+              },
+              "part": 0,
+              "velocity": 90
+            },
+            "input": {
+              "button": "east",
+              "kind": "button"
+            }
+          },
+          {
+            "action": {
+              "kind": "note",
+              "latch": "hold",
+              "note": {
+                "bass": false,
+                "chord": "triad",
+                "degree": 7,
+                "inversion": 0,
+                "open": false,
+                "type": "chord"
+              },
+              "part": 0,
+              "velocity": 90
+            },
+            "input": {
+              "button": "north",
+              "kind": "button"
+            }
+          }
+        ],
+        "id": "chords",
+        "name": "Аккорды"
+      }
+    ],
+    "meta": {
+      "category": "daw",
+      "description": "Ноты — крестовина и кнопки, октавы — плечи, LT — педаль, RT — сила нажатия. Правый стик: подтяжка и Mod Wheel, его нажатие — аккорды. Левый стик — две ручки (CC74, CC71) для MIDI Learn, с подхватом. Back/Start — CC 85/86 для Play и Record, нажатие левого стика — CC 87.",
+      "setup": [
+        {
+          "text": "Установи бесплатную программу loopMIDI и создай в ней порт (например, «loopMIDI Port»). Это «провод» от MusicGamepad к DAW."
+        },
+        {
+          "text": "Здесь, в боковой панели: выбери MIDI-выход «loopMIDI Port» и сними «Встроенный синтезатор», чтобы звук не двоился."
+        },
+        {
+          "text": "В Ableton: Options → Preferences → Link, Tempo & MIDI. У входа «loopMIDI Port» включи Track и Remote."
+        },
+        {
+          "text": "Создай MIDI-трек с инструментом и включи у него запись (Arm) — уже можно играть. В Ableton средняя «до» называется C3: это та же нота, что C4 здесь."
+        },
+        {
+          "learn": {
+            "button": "back",
+            "kind": "button"
+          },
+          "text": "Play: нажми Ctrl+M, кликни кнопку Play в Ableton и нажми Back на геймпаде."
+        },
+        {
+          "learn": {
+            "button": "start",
+            "kind": "button"
+          },
+          "text": "Record: в том же режиме кликни Record и нажми Start."
+        },
+        {
+          "learn": {
+            "axis": "left_x",
+            "kind": "axis"
+          },
+          "text": "Ручки: в режиме Ctrl+M кликни макрос или ручку инструмента и наклони левый стик влево-вправо…"
+        },
+        {
+          "learn": {
+            "axis": "left_y",
+            "kind": "axis"
+          },
+          "text": "…а вторую ручку — наклоном вверх-вниз. Ctrl+M ещё раз — выйти из режима."
+        },
+        {
+          "text": "По желанию — темп: в «Запись → ⚙» включи «MIDI Clock в DAW», а в Ableton у входа loopMIDI — Sync. Тогда метроном здесь ведёт темп Ableton."
+        }
+      ],
+      "target": "Ableton Live"
+    },
+    "music": {
+      "octave": 4,
+      "root": 0,
+      "scale": {
+        "preset": "major",
+        "type": "preset"
+      }
+    },
+    "name": "Ableton Live: клавиши",
+    "parts": [
+      {
+        "bank": 0,
+        "bend_range": 2,
+        "channel": 0,
+        "instruments": [],
+        "name": "В DAW",
+        "program": 0,
+        "sound": {
+          "attack": 64,
+          "brightness": 64,
+          "chorus": 0,
+          "pan": 64,
+          "release": 64,
+          "resonance": 64,
+          "reverb": 40
+        },
+        "transpose": 0,
+        "volume": 100
+      }
+    ]
+  },
   "axes": {
     "right_trigger": 0.6200000047683716,
     "right_x": 0.44999998807907104
@@ -485,6 +1092,72 @@
         "min": 0,
         "type": "cc"
       }
+    }
+  ],
+  "library": [
+    {
+      "builtin": true,
+      "category": "builtin",
+      "description": "Раскладка прототипа: 8 нот до мажора на крестовине и кнопках, октавы на плечах, полутон на LT, громкость на RT, подтяжка и вибрато на правом стике. Нажатие левого стика — аккорды, Back — следующий инструмент, Start — запись.",
+      "modified": false,
+      "name": "Классика",
+      "target": "Встроенный звук"
+    },
+    {
+      "builtin": true,
+      "category": "builtin",
+      "description": "Минорная пентатоника от «ля»: любая кнопка звучит «в тему» — удобно импровизировать под блюз и рок. LT — педаль, подтяжка на правом стике.",
+      "modified": false,
+      "name": "Импровизация: пентатоника",
+      "target": "Встроенный звук"
+    },
+    {
+      "builtin": true,
+      "category": "builtin",
+      "description": "A — бочка, B — малый, X/Y — хэт закрытый/открытый, крестовина — томы и хлопок, плечи — тарелки, LT — хэт педалью. Чем сильнее зажат RT, тем громче удары. Back — другая установка.",
+      "modified": false,
+      "name": "Барабаны",
+      "target": "Встроенный звук"
+    },
+    {
+      "builtin": true,
+      "category": "daw",
+      "description": "Ноты — крестовина и кнопки, октавы — плечи, LT — педаль, RT — сила нажатия. Правый стик: подтяжка и Mod Wheel, его нажатие — аккорды. Левый стик — две ручки (CC74, CC71) для MIDI Learn, с подхватом. Back/Start — CC 85/86 для Play и Record, нажатие левого стика — CC 87.",
+      "modified": false,
+      "name": "Ableton Live: клавиши",
+      "target": "Ableton Live"
+    },
+    {
+      "builtin": true,
+      "category": "daw",
+      "description": "13 пэдов Drum Rack (ноты 36–48, в Ableton C1…C2). Сила удара — RT, правый стик — две ручки для MIDI Learn. Back/Start — CC 85/86 для Play и Record.",
+      "modified": false,
+      "name": "Ableton Live: Drum Rack",
+      "target": "Ableton Live"
+    },
+    {
+      "builtin": true,
+      "category": "daw",
+      "description": "Ноты — крестовина и кнопки, октавы — плечи, LT — педаль, RT — сила нажатия. Правый стик: подтяжка и Mod Wheel, его нажатие — аккорды. Левый стик — две ручки (CC74, CC71) для MIDI Learn, с подхватом. Back/Start — CC 85/86 для Play и Record, нажатие левого стика — CC 87.",
+      "modified": false,
+      "name": "FL Studio: клавиши",
+      "target": "FL Studio"
+    },
+    {
+      "builtin": true,
+      "category": "synth",
+      "description": "Соло-партия в до миноре. LT — Aftertouch, RT — Mod Wheel, правый стик: подтяжка и CC74 (фильтр после MIDI Learn), левый стик — ещё две ручки (CC71, CC16). Все ручки с подхватом и сглаживанием.",
+      "modified": false,
+      "name": "Синтезатор: лид",
+      "target": "Serum, Vital и другие VST"
+    },
+    {
+      "builtin": true,
+      "category": "synth",
+      "description": "Бас в до миноре, вторая октава. RT — фильтр (CC74), LT — сила нажатия, правый стик — подтяжка и Mod Wheel, левый стик — две ручки (CC71, CC16).",
+      "modified": false,
+      "name": "Синтезатор: бас",
+      "target": "Serum, Vital и другие VST"
     }
   ],
   "music": {
@@ -1937,11 +2610,11 @@
   ],
   "pressed": [
     {
-      "button": "south",
+      "button": "left_shoulder",
       "kind": "button"
     },
     {
-      "button": "left_shoulder",
+      "button": "south",
       "kind": "button"
     }
   ],
@@ -2403,6 +3076,12 @@
         "name": "Аккорды"
       }
     ],
+    "meta": {
+      "category": "builtin",
+      "description": "Раскладка прототипа: 8 нот до мажора на крестовине и кнопках, октавы на плечах, полутон на LT, громкость на RT, подтяжка и вибрато на правом стике. Нажатие левого стика — аккорды, Back — следующий инструмент, Start — запись.",
+      "setup": [],
+      "target": "Встроенный звук"
+    },
     "music": {
       "octave": 4,
       "root": 0,

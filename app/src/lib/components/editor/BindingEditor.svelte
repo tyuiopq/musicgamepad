@@ -8,7 +8,7 @@
   import { CHORD_DEGREES, degreeNote, scaleSteps } from "$lib/music";
   import { defaultAction, roleOf, type Role } from "$lib/profileEdit";
   import { drumName, isDrums, presetName } from "$lib/sound";
-  import { voice } from "$lib/music";
+  import { chordNotes as chordNotesOf, learnMessages as learnOf } from "$lib/learn";
   import ShapeCurve from "./ShapeCurve.svelte";
 
   let {
@@ -100,16 +100,7 @@
     ["custom", "Свои интервалы"],
   ];
 
-  /** Звуки аккорда — как в ядре (theory::voice). */
-  function chordNotes(note: Extract<Action, { kind: "note" }>["note"]): number[] {
-    if (note.type !== "chord") return [];
-    const root = degreeNote(profile.music, note.degree);
-    const tones =
-      note.chord === "custom"
-        ? (note.intervals?.length ? note.intervals : [0, 4, 7]).map((i) => root + i)
-        : CHORD_DEGREES[note.chord].map((d) => degreeNote(profile.music, note.degree + d));
-    return voice(tones, note.inversion ?? 0, note.open ?? false, note.bass ?? false);
-  }
+  const chordNotes = (note: Extract<Action, { kind: "note" }>["note"]) => chordNotesOf(profile, note);
 
   function parseIntervals(text: string): number[] {
     return text
@@ -244,48 +235,7 @@
   }
 
   // ---------- MIDI Learn ----------
-  /** Сообщения, которые узнает DAW при «MIDI Learn»: то же, что шлёт этот контрол. */
-  function learnMessages(): [number, number[]][] {
-    if (!action) return [];
-    const ch = profile.parts[actionPart]?.channel ?? 0;
-    const shift = profile.parts[actionPart]?.transpose ?? 0;
-    switch (action.kind) {
-      case "note": {
-        const n = action.note;
-        const notes =
-          n.type === "degree" ? [degreeNote(profile.music, n.degree) + shift] : n.type === "absolute" ? [n.note] : chordNotes(n).map((x) => x + shift);
-        const first = Math.min(127, Math.max(0, notes[0]));
-        return [
-          [0, [0x90 | ch, first, 100]],
-          [250, [0x80 | ch, first, 0]],
-        ];
-      }
-      case "cc":
-        return action.step
-          ? [[0, [0xb0 | ch, action.cc, 64]]]
-          : [
-              [0, [0xb0 | ch, action.cc, action.on]],
-              [150, [0xb0 | ch, action.cc, action.off]],
-            ];
-      case "control": {
-        const t = action.target;
-        if (t.type === "cc")
-          return [
-            [0, [0xb0 | ch, t.cc, 64]],
-            [60, [0xb0 | ch, t.cc, 66]],
-          ];
-        if (t.type === "pressure") return [[0, [0xd0 | ch, 64]]];
-        if (t.type === "pitch_bend")
-          return [
-            [0, [0xe0 | ch, 0, 0x50]],
-            [120, [0xe0 | ch, 0, 0x40]],
-          ];
-        return [];
-      }
-      default:
-        return [];
-    }
-  }
+  const learnMessages = () => learnOf(action, profile);
   const canLearn = $derived(learnMessages().length > 0);
 
   function noteText(n: number): string {

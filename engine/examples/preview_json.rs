@@ -6,7 +6,7 @@ use engine::model::{Axis, Button};
 use engine::presets;
 
 fn main() {
-    let mut m = Mapper::new(presets::classic());
+    let mut m = Mapper::new(if std::env::args().any(|a| a == "ableton") { presets::ableton_keys() } else { presets::classic() });
     m.handle(InputEvent::Button { button: Button::LeftShoulder, down: true });
     m.handle(InputEvent::Button { button: Button::South, down: true });
     m.handle(InputEvent::Axis { axis: Axis::RightTrigger, value: 0.62 });
@@ -18,6 +18,8 @@ fn main() {
         "axes": m.axis_values(),
         "music": m.profile().music,
         "profile": m.profile(),
+        "ableton": presets::ableton_keys(),
+        "library": presets::library().iter().map(|p| serde_json::json!({"name": p.name, "builtin": true, "modified": false, "category": p.meta.category, "target": p.meta.target, "description": p.meta.description})).collect::<Vec<_>>(),
         "chords": m.preview_layer("chords"),
         "presets": engine::audio::SoundBank::find(None, &[]).and_then(|p| engine::audio::SoundBank::load(&p).ok()).map(|b| b.presets).unwrap_or_default(),
     });

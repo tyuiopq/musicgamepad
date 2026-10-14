@@ -62,6 +62,8 @@ pub struct Settings {
     pub pad: PadChoice,
     pub profile: Option<String>,
     pub transport: TransportSettings,
+    /// Какой профиль включать для какого семейства геймпадов (xbox, play_station, nintendo, generic).
+    pub pad_profiles: HashMap<String, String>,
 }
 
 impl Default for Settings {
@@ -75,6 +77,7 @@ impl Default for Settings {
             pad: PadChoice::Auto,
             profile: None,
             transport: TransportSettings::default(),
+            pad_profiles: HashMap::new(),
         }
     }
 }

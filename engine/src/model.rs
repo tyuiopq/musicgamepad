@@ -433,6 +433,35 @@ pub struct Profile {
     pub music: Music,
     pub parts: Vec<Part>,
     pub layers: Vec<Layer>,
+    #[serde(default, skip_serializing_if = "ProfileMeta::is_empty")]
+    pub meta: ProfileMeta,
+}
+
+/// Описание профиля для библиотеки: раздел, для чего он и как подключить.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ProfileMeta {
+    /// Раздел библиотеки: builtin (встроенный звук), daw, synth. Пусто — «Мои».
+    pub category: String,
+    /// Для чего профиль: «Ableton Live», «Встроенный звук»…
+    pub target: String,
+    pub description: String,
+    /// Шаги подключения (для DAW и синтезаторов).
+    pub setup: Vec<SetupStep>,
+}
+
+impl ProfileMeta {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// Шаг настройки. Если указан `learn` — рядом кнопка «Отправить для MIDI Learn» этого входа.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SetupStep {
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub learn: Option<Input>,
 }
 
 impl Profile {

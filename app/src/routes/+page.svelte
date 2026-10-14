@@ -3,7 +3,9 @@
   import { api, demoOption, type PadFamily, type Profile, type ProfileEntry, type Status } from "$lib/api";
   import Editor from "$lib/components/editor/Editor.svelte";
   import Gamepad from "$lib/components/Gamepad.svelte";
+  import Library from "$lib/components/Library.svelte";
   import Monitor from "$lib/components/Monitor.svelte";
+  import SetupCard from "$lib/components/SetupCard.svelte";
   import PianoRoll from "$lib/components/PianoRoll.svelte";
   import Recordings from "$lib/components/Recordings.svelte";
   import Sidebar from "$lib/components/Sidebar.svelte";
@@ -18,6 +20,7 @@
   let error = $state<string | null>(null);
   let view = $state<"play" | "edit" | "records">((demoOption("view") as "edit" | "records" | null) ?? "play");
   let editorDirty = $state(false);
+  let libraryOpen = $state(demoOption("library") !== null);
   let bottom = $state<"roll" | "monitor">(demoOption("bottom") === "monitor" ? "monitor" : "roll");
 
   /** Суммарный сдвиг от модификаторов: «−12 пт · +1 ступ.» */
@@ -85,7 +88,10 @@
   <p class="loading muted">Запускаю движок…</p>
 {:else}
   <div class="app">
-    <Sidebar {status} {profiles} {ports} {run} {refreshPorts} {view} onview={(v) => (view = v)} {editorDirty} />
+    <Sidebar {status} {profiles} {ports} {run} {refreshPorts} {view} onview={(v) => (view = v)} {editorDirty} onlibrary={() => (libraryOpen = true)} />
+    {#if libraryOpen}
+      <Library {profiles} current={status.profile} onclose={() => (libraryOpen = false)} onprofiles={refreshProfiles} {run} />
+    {/if}
 
     <main>
       <!-- Редактор не уничтожается при уходе с экрана, иначе потерялись бы несохранённые правки -->
@@ -132,6 +138,9 @@
         <Gamepad controls={status.controls} pressed={status.pressed} axes={status.axes} {family} {profile} />
       </section>
 
+      {#if profile && profile.name === status.profile}
+        <SetupCard {profile} {status} {run} />
+      {/if}
       <Transport transport={status.transport} {run} />
 
       <section class="roll">

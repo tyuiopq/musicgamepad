@@ -12,6 +12,7 @@
     view,
     onview,
     editorDirty,
+    onlibrary,
   }: {
     status: Status;
     profiles: ProfileEntry[];
@@ -21,7 +22,20 @@
     view: "play" | "edit" | "records";
     onview: (v: "play" | "edit" | "records") => void;
     editorDirty: boolean;
+    onlibrary: () => void;
   } = $props();
+
+  // Профиль для семейства активного геймпада (xbox, play_station…)
+  let padProfiles = $state<Record<string, string>>({});
+  $effect(() => {
+    api.settings().then((s) => (padProfiles = s.pad_profiles ?? {}));
+  });
+  const activeFamily = $derived(status.pads.find((p) => p.id === status.active_pad)?.family ?? null);
+
+  async function setPadProfile(family: string, name: string) {
+    await api.setPadProfile(family, name || null);
+    padProfiles = (await api.settings()).pad_profiles ?? {};
+  }
 
   const auto = $derived(status.pad_choice.mode === "auto");
   const fixedName = $derived(status.pad_choice.mode === "fixed" ? status.pad_choice.name : null);
@@ -93,6 +107,15 @@
         Играет тот, где нажали
       </label>
     {/if}
+    {#if activeFamily}
+      <label class="pad-profile" title="Этот профиль будет включаться сам, когда играешь таким геймпадом">
+        <span class="muted">Профиль для {familyName[activeFamily]}</span>
+        <select value={padProfiles[activeFamily] ?? ""} onchange={(e) => run(() => setPadProfile(activeFamily, e.currentTarget.value))}>
+          <option value="">не менять</option>
+          {#each profiles as p (p.name)}<option value={p.name}>{p.name}</option>{/each}
+        </select>
+      </label>
+    {/if}
     {#if status.input_error}<p class="error">{status.input_error}</p>{/if}
   </section>
 
@@ -108,6 +131,7 @@
         <option value={p.name}>{p.name}{p.modified ? " (изменён)" : ""}</option>
       {/each}
     </select>
+    <button type="button" class="library" onclick={onlibrary}>Библиотека профилей…</button>
     {#if status.music}
       <div class="fact"><span class="muted">Лад</span><span>{musicName(status.music)}</span></div>
     {/if}
@@ -209,6 +233,22 @@
     display: flex;
     flex-direction: column;
     gap: 24px;
+  }
+  .pad-profile {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 13px;
+  }
+  .library {
+    min-height: 36px;
+    border-radius: 10px;
+    border: 1px dashed var(--line-strong);
+    background: transparent;
+    color: var(--mod);
+  }
+  .library:hover {
+    border-color: var(--mod);
   }
   .views {
     display: grid;

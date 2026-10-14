@@ -213,11 +213,28 @@ export interface PresetInfo {
   name: string;
 }
 
+export interface SetupStep {
+  text: string;
+  learn?: Input;
+}
+
+export interface ProfileMeta {
+  category: string;
+  target: string;
+  description: string;
+  setup: SetupStep[];
+}
+
 export interface Profile {
   name: string;
   music: Music;
   parts: Part[];
   layers: Layer[];
+  meta?: ProfileMeta;
+}
+
+export interface AppSettings {
+  pad_profiles: Record<string, string>;
 }
 
 export interface Touched {
@@ -281,6 +298,10 @@ export interface ProfileEntry {
   builtin: boolean;
   /** Встроенный профиль изменён — можно вернуть заводской. */
   modified: boolean;
+  /** builtin, daw, synth или mine. */
+  category: string;
+  target: string;
+  description: string;
 }
 
 export const api = {
@@ -293,6 +314,10 @@ export const api = {
   applyProfile: (profile: Profile) => invoke<void>("apply_profile", { profile }),
   saveProfile: (profile: Profile, previous: string | null) => invoke<void>("save_profile", { profile, previous }),
   deleteProfile: (name: string) => invoke<string>("delete_profile", { name }),
+  exportProfile: (name: string) => invoke<string | null>("export_profile", { name }),
+  importProfile: () => invoke<string | null>("import_profile"),
+  settings: () => invoke<AppSettings>("get_settings"),
+  setPadProfile: (family: string, profile: string | null) => invoke<void>("set_pad_profile", { family, profile }),
   setPadChoice: (choice: PadChoice) => invoke<void>("set_pad_choice", { choice }),
   setSynthEnabled: (enabled: boolean) => invoke<void>("set_synth_enabled", { enabled }),
   setAudioMode: (mode: AudioMode) => invoke<void>("set_audio_mode", { mode }),

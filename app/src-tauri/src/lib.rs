@@ -165,6 +165,68 @@ fn save_profile(state: State<AppState>, profile: Profile, previous: Option<Strin
     Ok(())
 }
 
+/// Сохранить профиль в файл, чтобы поделиться. Возвращает путь или None, если окно закрыли.
+#[tauri::command]
+async fn export_profile(app: AppHandle, name: String) -> CmdResult<Option<String>> {
+    let state = app.state::<AppState>();
+    let profile = state.profiles.find(&name).ok_or(format!("профиль «{name}» не найден"))?;
+    let safe: String = name.chars().map(|c| if r#"<>:"/\|?*"#.contains(c) { '_' } else { c }).collect();
+    let Some(file) = app
+        .dialog()
+        .file()
+        .add_filter("Профиль MusicGamepad", &["json"])
+        .set_file_name(format!("{safe}.json"))
+        .blocking_save_file()
+    else {
+        return Ok(None);
+    };
+    let path = file.into_path().map_err(|e| e.to_string())?;
+    std::fs::write(&path, profile.to_json()).map_err(|e| e.to_string())?;
+    Ok(Some(path.display().to_string()))
+}
+
+/// Загрузить профиль из файла и сделать текущим. Возвращает его имя (при совпадении — «Имя (2)»).
+#[tauri::command]
+async fn import_profile(app: AppHandle) -> CmdResult<Option<String>> {
+    let Some(file) = app.dialog().file().add_filter("Профиль MusicGamepad", &["json"]).blocking_pick_file() else {
+        return Ok(None);
+    };
+    let path = file.into_path().map_err(|e| e.to_string())?;
+    let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let mut profile = Profile::from_json(&text).map_err(|e| format!("это не профиль MusicGamepad: {e}"))?;
+    let state = app.state::<AppState>();
+    profile.name = state.profiles.free_name(&profile.name);
+    state.profiles.save(&profile, None)?;
+    let name = profile.name.clone();
+    state.activate(profile);
+    Ok(Some(name))
+}
+
+/// Профиль, который включается, когда играешь геймпадом этого семейства (None — не менять).
+#[tauri::command]
+fn set_pad_profile(state: State<AppState>, family: String, profile: Option<String>) {
+    state.update_settings(|s| match profile {
+        Some(name) => {
+            s.pad_profiles.insert(family, name);
+        }
+        None => {
+            s.pad_profiles.remove(&family);
+        }
+    });
+}
+
+/// Сменился тип активного геймпада — включить назначенный ему профиль.
+fn auto_profile(app: &AppHandle, family: &str) {
+    let Some(state) = app.try_state::<AppState>() else { return };
+    let Some(name) = state.settings.lock().unwrap().pad_profiles.get(family).cloned() else { return };
+    if state.profile.lock().unwrap().name == name {
+        return;
+    }
+    if let Some(profile) = state.profiles.find(&name) {
+        state.activate(profile);
+    }
+}
+
 /// Удаляет профиль пользователя (для изменённого встроенного — возвращает заводской).
 /// Если он был текущим, текущим становится встроенный с тем же именем или «Классика».
 #[tauri::command]
@@ -348,8 +410,23 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             soundfont_dirs: vec![data_dir.join("sounds")],
             recordings_dir: recordings.clone(),
         },
-        move |status| {
-            let _ = handle.emit("status", status);
+        {
+            let mut last_family: Option<String> = None;
+            move |status: &Status| {
+                let _ = handle.emit("status", status);
+                let family = status
+                    .active_pad
+                    .and_then(|id| status.pads.iter().find(|p| p.id == id))
+                    .and_then(|p| serde_json::to_value(p.family).ok())
+                    .and_then(|v| v.as_str().map(str::to_string));
+                // До готовности состояния приложения смену не засчитываем — проверим в следующий раз
+                if family != last_family && handle.try_state::<AppState>().is_some() {
+                    if let Some(f) = &family {
+                        auto_profile(&handle, f);
+                    }
+                    last_family = family;
+                }
+            }
         },
     );
     app.manage(AppState {
@@ -389,6 +466,9 @@ pub fn run() {
             apply_profile,
             save_profile,
             delete_profile,
+            export_profile,
+            import_profile,
+            set_pad_profile,
             toggle_record,
             midi_monitor,
             send_test,
