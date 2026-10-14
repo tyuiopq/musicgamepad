@@ -118,10 +118,14 @@ export interface TransportSettings {
   send_mmc: boolean;
 }
 
+export type MonitorInput = { kind: "button"; button: string; down: boolean } | { kind: "axis"; axis: string; value: number };
+
 export interface MonitorEntry {
   seq: number;
   ms: number;
+  /** Ушедшее сообщение; у записей о входах пусто. */
   bytes: number[];
+  input?: MonitorInput;
 }
 
 export type LoopState = "empty" | "armed" | "recording" | "playing" | "overdub";

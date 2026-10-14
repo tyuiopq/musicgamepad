@@ -272,8 +272,23 @@ pub struct MonitorEntry {
     pub seq: u64,
     /// Мс от запуска движка.
     pub ms: f64,
+    /// Ушедшее сообщение (пусто у записей о входах).
     pub bytes: Vec<u8>,
+    /// Что пришло с геймпада.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input: Option<MonitorInput>,
 }
+
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MonitorInput {
+    Button { button: crate::model::Button, down: bool },
+    Axis { axis: Axis, value: f32 },
+}
+
+/// Движения осей в мониторе: не чаще и не мельче этого — иначе стик забьёт весь журнал.
+const MONITOR_AXIS_MS: u64 = 60;
+const MONITOR_AXIS_STEP: f32 = 0.05;
 
 /// Данные, которые поток движка публикует для интерфейса.
 #[derive(Default)]
@@ -286,11 +301,20 @@ pub struct Shared {
 
 impl Shared {
     fn log(&mut self, ms: f64, bytes: &[u8]) {
+        self.push(MonitorEntry { seq: 0, ms, bytes: bytes.to_vec(), input: None });
+    }
+
+    fn log_input(&mut self, ms: f64, input: MonitorInput) {
+        self.push(MonitorEntry { seq: 0, ms, bytes: Vec::new(), input: Some(input) });
+    }
+
+    fn push(&mut self, mut entry: MonitorEntry) {
         self.monitor_seq += 1;
+        entry.seq = self.monitor_seq;
         if self.monitor.len() >= MONITOR_SIZE {
             self.monitor.pop_front();
         }
-        self.monitor.push_back(MonitorEntry { seq: self.monitor_seq, ms, bytes: bytes.to_vec() });
+        self.monitor.push_back(entry);
     }
 }
 
@@ -413,6 +437,8 @@ struct Runtime {
     input_ms: Option<f32>,
     /// Последние сырые значения осей активного геймпада.
     raw_axes: HashMap<Axis, f32>,
+    /// Когда и с каким значением ось последний раз попала в монитор.
+    monitor_axes: HashMap<Axis, (Instant, f32)>,
     /// Калибровка активного геймпада (id геймпада, поправка) — чтобы не искать на каждое движение.
     cal_cache: Option<(u32, Option<Calibration>)>,
     touched: Option<Touched>,
@@ -469,6 +495,7 @@ impl Runtime {
             outputs: Vec::new(),
             input_ms: None,
             raw_axes: HashMap::new(),
+            monitor_axes: HashMap::new(),
             cal_cache: None,
             touched: None,
             axis_touch: Vec::new(),
@@ -553,6 +580,7 @@ impl Runtime {
                     self.active = Some(pad);
                 }
                 let event = self.calibrate(pad, event);
+                self.log_input(event);
                 self.track_touch(event);
                 if matches!(event, InputEvent::Button { down: true, .. }) {
                     let ms = input::ticks_ns().saturating_sub(t_ns) as f32 / 1e6;
@@ -576,6 +604,27 @@ impl Runtime {
             Some((_, Some(cal))) => InputEvent::Axis { axis, value: cal.apply(axis, value) },
             _ => event,
         }
+    }
+
+    fn log_input(&mut self, event: InputEvent) {
+        let input = match event {
+            InputEvent::Button { button, down } => MonitorInput::Button { button, down },
+            InputEvent::Axis { axis, value } => {
+                let now = Instant::now();
+                if let Some((t, last)) = self.monitor_axes.get(&axis) {
+                    let settled = value == 0.0 && *last != 0.0;
+                    let moved = (value - last).abs() >= MONITOR_AXIS_STEP;
+                    let due = now.duration_since(*t) >= Duration::from_millis(MONITOR_AXIS_MS);
+                    if !settled && !(moved && due) {
+                        return;
+                    }
+                }
+                self.monitor_axes.insert(axis, (now, value));
+                MonitorInput::Axis { axis, value }
+            }
+        };
+        let ms = self.started.elapsed().as_secs_f64() * 1000.0;
+        self.shared.lock().unwrap().log_input(ms, input);
     }
 
     fn track_touch(&mut self, event: InputEvent) {

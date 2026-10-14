@@ -138,6 +138,11 @@ function demoMonitor(since: number) {
   while (monitorSeq < since + 3) {
     monitorSeq++;
     const kind = monitorSeq % 6;
+    if (kind === 1 || kind === 4) {
+      const down = kind === 1;
+      out.push({ seq: monitorSeq, ms: monitorSeq * 37 - 2, bytes: [], input: { kind: "button", button: "south", down } });
+      continue;
+    }
     const bytes =
       kind === 0
         ? [0x90, 57, 100]

@@ -102,7 +102,7 @@
       {#if bottom === "roll"}
         <PianoRoll notes={status.notes} {tonic} />
       {:else}
-        <Monitor />
+        <Monitor {family} />
       {/if}
     </div>
   </section>

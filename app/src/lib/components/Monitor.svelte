@@ -1,8 +1,36 @@
 <script lang="ts">
-  // MIDI-монитор: всё, что программа отправляет — синтезатору и в MIDI-выход.
+  // MIDI-монитор: что пришло с геймпада и что программа отправила — синтезатору и в MIDI-выход.
   import { onMount } from "svelte";
-  import { api, type MonitorEntry } from "$lib/api";
-  import { noteName } from "$lib/labels";
+  import { api, type MonitorEntry, type MonitorInput, type PadFamily } from "$lib/api";
+  import { keyLabel, noteName } from "$lib/labels";
+
+  let { family = "xbox" }: { family?: PadFamily } = $props();
+
+  type Filter = "all" | "in" | "out";
+  let filter = $state<Filter>("all");
+  const FILTERS: [Filter, string][] = [
+    ["all", "Всё"],
+    ["in", "Входы"],
+    ["out", "Выходы"],
+  ];
+  const AXIS_NAMES: Record<string, string> = {
+    left_x: "Левый стик ↔",
+    left_y: "Левый стик ↕",
+    right_x: "Правый стик ↔",
+    right_y: "Правый стик ↕",
+  };
+
+  function describeInput(i: MonitorInput): { ch: string; kind: string; data: string } {
+    if (i.kind === "button") {
+      return { ch: "", kind: i.down ? "▼ Кнопка" : "▲ Кнопка", data: keyLabel({ kind: "button", button: i.button }, family) };
+    }
+    const name = i.axis.endsWith("trigger")
+      ? keyLabel({ kind: "axis_switch", axis: i.axis, direction: "positive" }, family)
+      : (AXIS_NAMES[i.axis] ?? i.axis);
+    const v = i.value;
+    return { ch: "", kind: "Ось", data: `${name} · ${v > 0 ? "+" : ""}${v.toFixed(2)}` };
+  }
+
 
   const MAX = 300;
   const CC_NAMES: Record<number, string> = {
@@ -28,6 +56,7 @@
   };
 
   let rows = $state<MonitorEntry[]>([]);
+  const shown = $derived(filter === "all" ? rows : rows.filter((r) => (filter === "in") === !!r.input));
   let paused = $state(false);
   let since = 0;
   let box: HTMLDivElement;
@@ -79,12 +108,17 @@
   <div class="tools">
     <button type="button" class="ghost" aria-pressed={paused} onclick={() => (paused = !paused)}>{paused ? "▶ Продолжить" : "❚❚ Пауза"}</button>
     <button type="button" class="ghost" onclick={() => (rows = [])}>Очистить</button>
-    <span class="muted small">Что уходит синтезатору и в MIDI-выход. MIDI Clock не показывается.</span>
+    <div class="seg filter">
+      {#each FILTERS as [f, label] (f)}
+        <button type="button" class:on={filter === f} aria-pressed={filter === f} onclick={() => (filter = f)}>{label}</button>
+      {/each}
+    </div>
+    <span class="muted small">Входы геймпада и то, что уходит синтезатору и в MIDI-выход. MIDI Clock не показывается.</span>
   </div>
   <div class="log" bind:this={box} role="log" aria-live="off">
-    {#each rows as r (r.seq)}
-      {@const d = describe(r.bytes)}
-      <div class="row" class:note={d.kind.startsWith("Note On")}>
+    {#each shown as r (r.seq)}
+      {@const d = r.input ? describeInput(r.input) : describe(r.bytes)}
+      <div class="row" class:note={d.kind.startsWith("Note On")} class:from-pad={!!r.input}>
         <span class="t">{(r.ms / 1000).toFixed(3)}</span>
         <span class="ch">{d.ch}</span>
         <span class="kind">{d.kind}</span>
@@ -146,6 +180,13 @@
   }
   .row.note .kind {
     color: var(--accent);
+  }
+  .row.from-pad .kind,
+  .row.from-pad .data {
+    color: var(--mod);
+  }
+  .filter > button {
+    flex: 0 0 auto;
   }
   .small {
     font-size: 12px;
