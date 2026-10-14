@@ -317,8 +317,33 @@
       {@const triggers = layerTriggers(draft, layer.id)}
       <div class="layer-bar">
         <input aria-label="Название слоя" bind:value={layer.name} oninput={changed} maxlength="40" />
+        <details class="combo">
+          <summary>{layer.combo?.length ? `Комбинация: ${layer.combo.map((id) => draft!.layers.find((l) => l.id === id)?.name ?? id).join(" + ")}` : "Сделать комбинацией слоёв…"}</summary>
+          <p class="muted small">
+            Слой включится сам, когда включены все отмеченные слои (например, LB + RB). Комбинация важнее слоёв, из которых
+            состоит; среди остальных главнее тот, что ниже в списке вкладок.
+          </p>
+          {#each draft.layers.filter((l) => l.id !== "base" && l.id !== layer.id) as other (other.id)}
+            <label class="check">
+              <input
+                type="checkbox"
+                checked={layer.combo?.includes(other.id) ?? false}
+                onchange={(e) => {
+                  const set = new Set(layer.combo ?? []);
+                  if (e.currentTarget.checked) set.add(other.id);
+                  else set.delete(other.id);
+                  layer.combo = [...set];
+                  changed();
+                }}
+              />
+              {other.name}
+            </label>
+          {/each}
+        </details>
         <span class="muted">
-          {#if triggers.length}
+          {#if layer.combo?.length}
+            Включается комбинацией слоёв.
+          {:else if triggers.length}
             Включается: {triggers
               .map((b) => `${inputLabel(b.input)}${b.action.kind === "modifier" && b.action.latch === "toggle" ? " (переключатель)" : " (пока зажата)"}`)
               .join(", ")}
@@ -354,7 +379,17 @@
 
       <aside class="inspect">
         {#if selected}
-          <Inspector control={selected} {layer} profile={draft} {family} axes={status.axes} onchange={onBinding} onnewlayer={newLayer} />
+          <Inspector
+            control={selected}
+            {layer}
+            profile={draft}
+            {family}
+            axes={status.axes}
+            {presets}
+            midiPort={status.midi.port}
+            onchange={onBinding}
+            onnewlayer={newLayer}
+          />
         {:else}
           <p class="muted">Выбери кнопку, курок или стик на схеме — или нажми «Назначить с геймпада» и коснись нужного.</p>
         {/if}
@@ -505,6 +540,19 @@
   }
   .layer-bar span {
     flex: 1 1 240px;
+  }
+  .combo {
+    flex-basis: 100%;
+    font-size: 13px;
+  }
+  .combo summary {
+    cursor: pointer;
+    color: var(--mod);
+  }
+  .combo .check {
+    display: inline-flex;
+    gap: 6px;
+    margin-right: 14px;
   }
   .work {
     display: flex;

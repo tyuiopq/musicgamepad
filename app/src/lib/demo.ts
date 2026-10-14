@@ -21,6 +21,7 @@ function baseStatus(): Status {
     controls: scene.controls as Status["controls"],
     axes: scene.axes,
     transpose: -12,
+    degree_shift: 0,
     notes: scene.notes,
     pressed: scene.pressed as Status["pressed"],
     parts: [{ name: "Мелодия", channel: 0, program: 0, instrument: "Grand Piano" }],
@@ -50,6 +51,8 @@ function baseStatus(): Status {
         quantize: "off",
         loop_bars: 2,
         export_wav: false,
+        send_clock: false,
+        send_mmc: false,
       },
       bar: 3,
       beat: 2,
@@ -96,6 +99,7 @@ export const demo: Record<string, (args?: Record<string, unknown>) => unknown> =
   preview_profile: (args) => (args?.layer === "chords" ? scene.chords : scene.controls),
   apply_profile: () => undefined,
   get_presets: () => scene.presets,
+  midi_monitor: (args) => demoMonitor(Number(args?.since ?? 0)),
   list_recordings: () => [
     { name: "melody_2026-10-14_18-20-03", mid: "a.mid", wav: "a.wav", modified: "2026-10-14 18:20", bytes: 812345 },
     { name: "melody_2026-10-13_15-02-11", mid: "b.mid", wav: null, modified: "2026-10-13 15:02", bytes: 2344 },
@@ -106,6 +110,26 @@ export const demo: Record<string, (args?: Record<string, unknown>) => unknown> =
     emit();
   },
 };
+
+/** Демо MIDI-монитора: немного правдоподобного потока. */
+let monitorSeq = 0;
+function demoMonitor(since: number) {
+  const out = [];
+  while (monitorSeq < since + 3) {
+    monitorSeq++;
+    const kind = monitorSeq % 6;
+    const bytes =
+      kind === 0
+        ? [0x90, 57, 100]
+        : kind === 3
+          ? [0x80, 57, 0]
+          : kind === 5
+            ? [0xe0, 0, 0x48]
+            : [0xb0, 74, 60 + (monitorSeq % 30)];
+    out.push({ seq: monitorSeq, ms: monitorSeq * 37, bytes });
+  }
+  return out;
+}
 
 export function demoListen(cb: (s: Status) => void) {
   listeners.push(cb);

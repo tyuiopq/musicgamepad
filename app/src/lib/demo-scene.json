@@ -10,12 +10,14 @@
         "button": "dpad_left",
         "kind": "button"
       },
+      "latch": "hold",
       "layer": "chords",
       "notes": [
         48,
         52,
         55
       ],
+      "on": false,
       "role": "note"
     },
     {
@@ -24,12 +26,14 @@
         "button": "dpad_down",
         "kind": "button"
       },
+      "latch": "hold",
       "layer": "chords",
       "notes": [
         50,
         53,
         57
       ],
+      "on": false,
       "role": "note"
     },
     {
@@ -38,12 +42,14 @@
         "button": "dpad_right",
         "kind": "button"
       },
+      "latch": "hold",
       "layer": "chords",
       "notes": [
         52,
         55,
         59
       ],
+      "on": false,
       "role": "note"
     },
     {
@@ -52,12 +58,14 @@
         "button": "dpad_up",
         "kind": "button"
       },
+      "latch": "hold",
       "layer": "chords",
       "notes": [
         53,
         57,
         60
       ],
+      "on": false,
       "role": "note"
     },
     {
@@ -66,12 +74,14 @@
         "button": "west",
         "kind": "button"
       },
+      "latch": "hold",
       "layer": "chords",
       "notes": [
         55,
         59,
         62
       ],
+      "on": false,
       "role": "note"
     },
     {
@@ -80,12 +90,14 @@
         "button": "south",
         "kind": "button"
       },
+      "latch": "hold",
       "layer": "chords",
       "notes": [
         57,
         60,
         64
       ],
+      "on": false,
       "role": "note"
     },
     {
@@ -94,12 +106,14 @@
         "button": "east",
         "kind": "button"
       },
+      "latch": "hold",
       "layer": "chords",
       "notes": [
         59,
         62,
         65
       ],
+      "on": false,
       "role": "note"
     },
     {
@@ -108,12 +122,14 @@
         "button": "north",
         "kind": "button"
       },
+      "latch": "hold",
       "layer": "chords",
       "notes": [
         60,
         64,
         67
       ],
+      "on": false,
       "role": "note"
     },
     {
@@ -244,10 +260,12 @@
         "button": "dpad_left",
         "kind": "button"
       },
+      "latch": "hold",
       "layer": "base",
       "notes": [
         48
       ],
+      "on": false,
       "role": "note"
     },
     {
@@ -256,10 +274,12 @@
         "button": "dpad_down",
         "kind": "button"
       },
+      "latch": "hold",
       "layer": "base",
       "notes": [
         50
       ],
+      "on": false,
       "role": "note"
     },
     {
@@ -268,10 +288,12 @@
         "button": "dpad_right",
         "kind": "button"
       },
+      "latch": "hold",
       "layer": "base",
       "notes": [
         52
       ],
+      "on": false,
       "role": "note"
     },
     {
@@ -280,10 +302,12 @@
         "button": "dpad_up",
         "kind": "button"
       },
+      "latch": "hold",
       "layer": "base",
       "notes": [
         53
       ],
+      "on": false,
       "role": "note"
     },
     {
@@ -292,10 +316,12 @@
         "button": "west",
         "kind": "button"
       },
+      "latch": "hold",
       "layer": "base",
       "notes": [
         55
       ],
+      "on": false,
       "role": "note"
     },
     {
@@ -304,10 +330,12 @@
         "button": "south",
         "kind": "button"
       },
+      "latch": "hold",
       "layer": "base",
       "notes": [
         57
       ],
+      "on": false,
       "role": "note"
     },
     {
@@ -316,10 +344,12 @@
         "button": "east",
         "kind": "button"
       },
+      "latch": "hold",
       "layer": "base",
       "notes": [
         59
       ],
+      "on": false,
       "role": "note"
     },
     {
@@ -328,10 +358,12 @@
         "button": "north",
         "kind": "button"
       },
+      "latch": "hold",
       "layer": "base",
       "notes": [
         60
       ],
+      "on": false,
       "role": "note"
     },
     {
@@ -1920,6 +1952,7 @@
           {
             "action": {
               "kind": "note",
+              "latch": "hold",
               "note": {
                 "degree": 0,
                 "type": "degree"
@@ -1935,6 +1968,7 @@
           {
             "action": {
               "kind": "note",
+              "latch": "hold",
               "note": {
                 "degree": 1,
                 "type": "degree"
@@ -1950,6 +1984,7 @@
           {
             "action": {
               "kind": "note",
+              "latch": "hold",
               "note": {
                 "degree": 2,
                 "type": "degree"
@@ -1965,6 +2000,7 @@
           {
             "action": {
               "kind": "note",
+              "latch": "hold",
               "note": {
                 "degree": 3,
                 "type": "degree"
@@ -1980,6 +2016,7 @@
           {
             "action": {
               "kind": "note",
+              "latch": "hold",
               "note": {
                 "degree": 4,
                 "type": "degree"
@@ -1995,6 +2032,7 @@
           {
             "action": {
               "kind": "note",
+              "latch": "hold",
               "note": {
                 "degree": 5,
                 "type": "degree"
@@ -2010,6 +2048,7 @@
           {
             "action": {
               "kind": "note",
+              "latch": "hold",
               "note": {
                 "degree": 6,
                 "type": "degree"
@@ -2025,6 +2064,7 @@
           {
             "action": {
               "kind": "note",
+              "latch": "hold",
               "note": {
                 "degree": 7,
                 "type": "degree"
@@ -2124,12 +2164,15 @@
             "action": {
               "kind": "control",
               "part": 0,
+              "relative": false,
               "shape": {
                 "curve": 1.0,
                 "deadzone": 0.019999999552965164,
                 "invert": false,
-                "mode": "positive"
+                "mode": "positive",
+                "smoothing": 0.0
               },
+              "takeover": false,
               "target": {
                 "cc": 11,
                 "max": 127,
@@ -2146,12 +2189,15 @@
             "action": {
               "kind": "control",
               "part": 0,
+              "relative": false,
               "shape": {
                 "curve": 1.0,
                 "deadzone": 0.15000000596046448,
                 "invert": false,
-                "mode": "bipolar"
+                "mode": "bipolar",
+                "smoothing": 0.0
               },
+              "takeover": false,
               "target": {
                 "type": "pitch_bend"
               }
@@ -2165,12 +2211,15 @@
             "action": {
               "kind": "control",
               "part": 0,
+              "relative": false,
               "shape": {
                 "curve": 1.0,
                 "deadzone": 0.15000000596046448,
                 "invert": false,
-                "mode": "absolute"
+                "mode": "absolute",
+                "smoothing": 0.0
               },
+              "takeover": false,
               "target": {
                 "cc": 1,
                 "max": 127,
@@ -2192,9 +2241,13 @@
           {
             "action": {
               "kind": "note",
+              "latch": "hold",
               "note": {
+                "bass": false,
                 "chord": "triad",
                 "degree": 0,
+                "inversion": 0,
+                "open": false,
                 "type": "chord"
               },
               "part": 0,
@@ -2208,9 +2261,13 @@
           {
             "action": {
               "kind": "note",
+              "latch": "hold",
               "note": {
+                "bass": false,
                 "chord": "triad",
                 "degree": 1,
+                "inversion": 0,
+                "open": false,
                 "type": "chord"
               },
               "part": 0,
@@ -2224,9 +2281,13 @@
           {
             "action": {
               "kind": "note",
+              "latch": "hold",
               "note": {
+                "bass": false,
                 "chord": "triad",
                 "degree": 2,
+                "inversion": 0,
+                "open": false,
                 "type": "chord"
               },
               "part": 0,
@@ -2240,9 +2301,13 @@
           {
             "action": {
               "kind": "note",
+              "latch": "hold",
               "note": {
+                "bass": false,
                 "chord": "triad",
                 "degree": 3,
+                "inversion": 0,
+                "open": false,
                 "type": "chord"
               },
               "part": 0,
@@ -2256,9 +2321,13 @@
           {
             "action": {
               "kind": "note",
+              "latch": "hold",
               "note": {
+                "bass": false,
                 "chord": "triad",
                 "degree": 4,
+                "inversion": 0,
+                "open": false,
                 "type": "chord"
               },
               "part": 0,
@@ -2272,9 +2341,13 @@
           {
             "action": {
               "kind": "note",
+              "latch": "hold",
               "note": {
+                "bass": false,
                 "chord": "triad",
                 "degree": 5,
+                "inversion": 0,
+                "open": false,
                 "type": "chord"
               },
               "part": 0,
@@ -2288,9 +2361,13 @@
           {
             "action": {
               "kind": "note",
+              "latch": "hold",
               "note": {
+                "bass": false,
                 "chord": "triad",
                 "degree": 6,
+                "inversion": 0,
+                "open": false,
                 "type": "chord"
               },
               "part": 0,
@@ -2304,9 +2381,13 @@
           {
             "action": {
               "kind": "note",
+              "latch": "hold",
               "note": {
+                "bass": false,
                 "chord": "triad",
                 "degree": 7,
+                "inversion": 0,
+                "open": false,
                 "type": "chord"
               },
               "part": 0,

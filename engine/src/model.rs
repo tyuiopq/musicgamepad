@@ -95,13 +95,32 @@ pub struct Binding {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Action {
-    /// Сыграть ноту или аккорд, пока вход зажат.
+    /// Сыграть ноту или аккорд: пока вход зажат или до повторного нажатия (защёлка).
     Note {
         note: NoteSpec,
         #[serde(default)]
         part: usize,
         #[serde(default = "default_velocity")]
         velocity: u8,
+        #[serde(default)]
+        latch: Latch,
+    },
+    /// CC от кнопки: `on` при нажатии и `off` при отпускании (или переключателем),
+    /// либо шаг `step` к текущему значению при каждом нажатии (относительный режим).
+    /// Через MIDI Map в DAW так вешаются Play, Record, Mute и т.п.
+    Cc {
+        cc: u8,
+        #[serde(default)]
+        part: usize,
+        #[serde(default = "default_cc_on")]
+        on: u8,
+        #[serde(default)]
+        off: u8,
+        #[serde(default)]
+        latch: Latch,
+        /// Не 0 — относительный режим: прибавить к текущему значению.
+        #[serde(default)]
+        step: i8,
     },
     /// Изменить поведение остальных кнопок, пока вход зажат (или до повторного нажатия).
     Modifier {
@@ -118,6 +137,13 @@ pub enum Action {
         shape: AxisShape,
         #[serde(default)]
         part: usize,
+        /// Подхват (soft takeover): после смены слоя не прыгать к положению стика,
+        /// а ждать, пока стик «догонит» последнее отправленное значение.
+        #[serde(default)]
+        takeover: bool,
+        /// Относительный режим: отклонение задаёт скорость изменения, а не значение.
+        #[serde(default)]
+        relative: bool,
     },
 }
 
@@ -125,15 +151,34 @@ fn default_velocity() -> u8 {
     100
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+fn default_cc_on() -> u8 {
+    127
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum NoteSpec {
     /// Ступень лада от тоники: 0 — тоника, 7 — тоника октавой выше (в семиступенном ладу).
     Degree { degree: i32 },
     /// Конкретная MIDI-нота, лад и тоника не влияют (удобно для ударных).
     Absolute { note: u8 },
-    /// Аккорд из ступеней лада, построенный от `degree`.
-    Chord { degree: i32, chord: ChordKind },
+    /// Аккорд от ступени `degree`.
+    Chord {
+        degree: i32,
+        chord: ChordKind,
+        /// Для `ChordKind::Custom`: интервалы от основного тона в полутонах, например [0, 4, 7, 11].
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        intervals: Vec<i32>,
+        /// Обращение: сколько нижних звуков поднять на октаву.
+        #[serde(default)]
+        inversion: u8,
+        /// Широкое расположение: второй снизу звук на октаву выше.
+        #[serde(default)]
+        open: bool,
+        /// Добавить основной тон октавой ниже.
+        #[serde(default)]
+        bass: bool,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -143,8 +188,18 @@ pub enum ChordKind {
     Triad,
     /// Септаккорд: 1-3-5-7.
     Seventh,
+    /// Нонаккорд: 1-3-5-7-9.
+    Ninth,
+    /// С задержанием: 1-2-5.
+    Sus2,
+    /// С задержанием: 1-4-5.
+    Sus4,
+    /// Секстаккорд: 1-3-5-6.
+    Sixth,
     /// «Пауэр-аккорд»: 1-5-8.
     Power,
+    /// Свои интервалы в полутонах (не зависят от лада).
+    Custom,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -188,6 +243,14 @@ pub enum Command {
     /// Заглушить всё.
     Panic,
     ToggleMetronome,
+    /// Сменить инструмент партии на конкретный (Program Change).
+    SetProgram {
+        #[serde(default)]
+        part: usize,
+        program: u8,
+        #[serde(default)]
+        bank: u16,
+    },
     /// Лупер: начать петлю / наложить слой / закончить слой.
     LoopRecord,
     /// Лупер: отменить последний слой.
@@ -205,6 +268,8 @@ pub enum ControlTarget {
     Cc { cc: u8, min: u8, max: u8 },
     /// Сила нажатия для следующих нот.
     Velocity { min: u8, max: u8 },
+    /// Давление на канал (Channel Pressure / aftertouch).
+    Pressure { min: u8, max: u8 },
 }
 
 /// Как значение оси превращается в выход.
@@ -217,11 +282,13 @@ pub struct AxisShape {
     pub curve: f32,
     pub invert: bool,
     pub mode: AxisMode,
+    /// Сглаживание, мс: убирает дрожание стика (0 — без сглаживания).
+    pub smoothing: f32,
 }
 
 impl Default for AxisShape {
     fn default() -> Self {
-        Self { deadzone: 0.15, curve: 1.0, invert: false, mode: AxisMode::Bipolar }
+        Self { deadzone: 0.15, curve: 1.0, invert: false, mode: AxisMode::Bipolar, smoothing: 0.0 }
     }
 }
 
@@ -245,6 +312,10 @@ pub struct Layer {
     pub id: String,
     pub name: String,
     pub bindings: Vec<Binding>,
+    /// Слой-комбинация: включается сам, когда включены все перечисленные слои
+    /// (например, «LB+RB»). Такой слой важнее слоёв, из которых состоит.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub combo: Vec<String>,
 }
 
 /// Звуковая партия: свой MIDI-канал и инструмент. Несколько партий звучат одновременно.
@@ -382,10 +453,17 @@ impl Profile {
             anyhow::ensure!(p.channel < 16, "канал партии «{}» вне 0..15", p.name);
         }
         for layer in &self.layers {
+            for id in &layer.combo {
+                anyhow::ensure!(*id != layer.id, "слой «{}» не может включаться сам собой", layer.name);
+                anyhow::ensure!(self.layers.iter().any(|l| &l.id == id), "комбинация слоя «{}» ссылается на несуществующий слой", layer.name);
+            }
             for b in &layer.bindings {
                 let part = match &b.action {
-                    Action::Note { part, .. } | Action::Control { part, .. } => Some(*part),
-                    Action::Command { command: Command::NextInstrument { part } | Command::PrevInstrument { part } } => Some(*part),
+                    Action::Note { part, .. } | Action::Control { part, .. } | Action::Cc { part, .. } => Some(*part),
+                    Action::Command {
+                        command:
+                            Command::NextInstrument { part } | Command::PrevInstrument { part } | Command::SetProgram { part, .. },
+                    } => Some(*part),
                     _ => None,
                 };
                 if let Some(part) = part {
@@ -393,6 +471,9 @@ impl Profile {
                 }
                 if let Action::Modifier { effect: ModEffect::Layer { layer: id }, .. } = &b.action {
                     anyhow::ensure!(self.layers.iter().any(|l| &l.id == id), "модификатор ссылается на несуществующий слой «{id}»");
+                }
+                if let Action::Cc { cc, on, off, .. } = &b.action {
+                    anyhow::ensure!(*cc < 128 && *on < 128 && *off < 128, "CC и значения — 0..127");
                 }
                 let is_axis = matches!(b.input, Input::Axis { .. });
                 let is_control = matches!(b.action, Action::Control { .. });

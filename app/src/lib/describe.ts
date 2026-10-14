@@ -64,6 +64,8 @@ export function roleLabel(v: ControlView, profile: Profile | null): string {
   switch (v.role) {
     case "note":
       return v.notes.length ? noteName(v.notes[0]) : "—";
+    case "cc":
+      return v.step ? `CC${v.cc} ${v.step > 0 ? "+" : ""}${v.step}` : (CC_NAMES[v.cc] ?? `CC${v.cc}`);
     case "modifier":
       return effectLabel(v.effect, profile);
     case "command":
@@ -78,6 +80,8 @@ export function roleLabel(v: ControlView, profile: Profile | null): string {
           return "тишина";
         case "toggle_metronome":
           return "метроном";
+        case "set_program":
+          return `патч ${v.command.program + 1}`;
         case "loop_record":
           return "луп";
         case "loop_undo":
@@ -94,6 +98,8 @@ export function roleLabel(v: ControlView, profile: Profile | null): string {
           return CC_NAMES[v.target.cc] ?? `CC ${v.target.cc}`;
         case "velocity":
           return "сила";
+        case "pressure":
+          return "давление";
       }
   }
   return "";

@@ -22,6 +22,10 @@ pub struct TransportSettings {
     pub loop_bars: u8,
     /// Сохранять запись ещё и в WAV.
     pub export_wav: bool,
+    /// Слать в MIDI-выход MIDI Clock и Start/Stop, пока идут часы (синхронизация DAW).
+    pub send_clock: bool,
+    /// Слать MMC (Record/Stop) при записи — для DAW, которые его понимают.
+    pub send_mmc: bool,
 }
 
 impl Default for TransportSettings {
@@ -35,6 +39,8 @@ impl Default for TransportSettings {
             quantize: Quantize::Off,
             loop_bars: 2,
             export_wav: false,
+            send_clock: false,
+            send_mmc: false,
         }
     }
 }

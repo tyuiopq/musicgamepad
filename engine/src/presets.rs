@@ -7,13 +7,18 @@ fn button(button: Button) -> Input {
 }
 
 fn note(input: Input, degree: i32) -> Binding {
-    Binding { input, action: Action::Note { note: NoteSpec::Degree { degree }, part: 0, velocity: 100 } }
+    Binding { input, action: Action::Note { note: NoteSpec::Degree { degree }, part: 0, velocity: 100, latch: Latch::Hold } }
 }
 
 fn chord(input: Input, degree: i32) -> Binding {
     Binding {
         input,
-        action: Action::Note { note: NoteSpec::Chord { degree, chord: ChordKind::Triad }, part: 0, velocity: 90 },
+        action: Action::Note {
+            note: NoteSpec::Chord { degree, chord: ChordKind::Triad, intervals: vec![], inversion: 0, open: false, bass: false },
+            part: 0,
+            velocity: 90,
+            latch: Latch::Hold,
+        },
     }
 }
 
@@ -26,7 +31,7 @@ fn command(input: Input, command: Command) -> Binding {
 }
 
 fn control(axis: Axis, target: ControlTarget, shape: AxisShape) -> Binding {
-    Binding { input: Input::Axis { axis }, action: Action::Control { target, shape, part: 0 } }
+    Binding { input: Input::Axis { axis }, action: Action::Control { target, shape, part: 0, takeover: false, relative: false } }
 }
 
 /// Ступени по кнопкам: крестовина — нижние, четыре кнопки — верхние (как в прототипе).
@@ -85,8 +90,8 @@ pub fn classic() -> Profile {
             sound: Sound::default(),
         }],
         layers: vec![
-            Layer { id: "base".into(), name: "Основной".into(), bindings: base },
-            Layer { id: "chords".into(), name: "Аккорды".into(), bindings: chords },
+            Layer { id: "base".into(), name: "Основной".into(), bindings: base, combo: vec![] },
+            Layer { id: "chords".into(), name: "Аккорды".into(), bindings: chords, combo: vec![] },
         ],
     }
 }
@@ -144,5 +149,39 @@ mod editor_json {
         }"#;
         let p = Profile::from_json(json).expect("профиль из редактора должен приниматься");
         assert_eq!(p.layers[0].bindings.len(), 8);
+    }
+
+    #[test]
+    fn editor_output_with_pro_features_is_accepted() {
+        let json = r#"{
+          "name": "Про",
+          "music": { "root": 0, "octave": 4, "scale": { "type": "preset", "preset": "major" } },
+          "parts": [{ "name": "Мелодия", "channel": 0, "program": 0, "bank": 0, "volume": 100, "bend_range": 2, "instruments": [],
+                      "transpose": 0, "sound": { "pan": 64, "reverb": 40, "chorus": 0, "attack": 64, "release": 64, "brightness": 64, "resonance": 64 } }],
+          "layers": [
+            { "id": "base", "name": "Основной", "bindings": [
+              { "input": { "kind": "button", "button": "south" },
+                "action": { "kind": "note", "note": { "type": "chord", "degree": 0, "chord": "custom", "intervals": [0, 3, 7, 10], "inversion": 1, "open": true, "bass": true },
+                            "part": 0, "velocity": 90, "latch": "toggle" } },
+              { "input": { "kind": "button", "button": "east" },
+                "action": { "kind": "cc", "cc": 64, "part": 0, "on": 127, "off": 0, "latch": "hold", "step": 0 } },
+              { "input": { "kind": "button", "button": "west" },
+                "action": { "kind": "command", "command": { "type": "set_program", "part": 0, "program": 40, "bank": 0 } } },
+              { "input": { "kind": "button", "button": "left_shoulder" },
+                "action": { "kind": "modifier", "effect": { "type": "layer", "layer": "a" }, "latch": "hold" } },
+              { "input": { "kind": "button", "button": "right_shoulder" },
+                "action": { "kind": "modifier", "effect": { "type": "layer", "layer": "b" }, "latch": "hold" } },
+              { "input": { "kind": "axis", "axis": "left_trigger" },
+                "action": { "kind": "control", "target": { "type": "pressure", "min": 0, "max": 127 },
+                            "shape": { "deadzone": 0.02, "curve": 1, "invert": false, "mode": "positive", "smoothing": 30 },
+                            "part": 0, "takeover": true, "relative": false } }
+            ] },
+            { "id": "a", "name": "A", "bindings": [] },
+            { "id": "b", "name": "B", "bindings": [] },
+            { "id": "ab", "name": "A+B", "bindings": [], "combo": ["a", "b"] }
+          ]
+        }"#;
+        let p = Profile::from_json(json).expect("профиль из редактора должен приниматься");
+        assert_eq!(p.layers[3].combo, ["a", "b"]);
     }
 }

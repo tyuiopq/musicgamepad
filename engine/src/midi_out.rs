@@ -29,6 +29,11 @@ impl MidiOut {
         Ok(Self { conn, port: port.to_string() })
     }
 
+    /// Произвольные байты (SysEx, например MMC).
+    pub fn send_raw(&mut self, bytes: &[u8]) -> anyhow::Result<()> {
+        self.conn.send(bytes).map_err(|e| anyhow!("MIDI-порт «{}»: {e}", self.port))
+    }
+
     pub fn send(&mut self, msg: MidiMsg) -> anyhow::Result<()> {
         self.conn.send(msg.as_slice()).map_err(|e| anyhow!("MIDI-порт «{}»: {e}", self.port))
     }

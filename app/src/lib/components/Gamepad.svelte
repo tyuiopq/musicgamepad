@@ -58,6 +58,8 @@
     const v = view(input);
     const down = isPressed(input);
     if (v?.role === "modifier" && (v.active || down)) return "mod";
+    if (v?.role === "note" && v.on) return "note";
+    if (v?.role === "cc" && (v.on || down)) return "mod";
     if (down) return v?.role === "note" ? "note" : "pressed";
     return "idle";
   }

@@ -32,6 +32,16 @@ impl MidiMsg {
         Self { bytes: [0xC0 | ch, program & 0x7F, 0], len: 2 }
     }
 
+    /// Channel Pressure (aftertouch на весь канал).
+    pub fn pressure(ch: u8, value: u8) -> Self {
+        Self { bytes: [0xD0 | ch, value & 0x7F, 0], len: 2 }
+    }
+
+    /// Однобайтовое системное сообщение реального времени (Clock, Start, Stop…).
+    pub fn realtime(status: u8) -> Self {
+        Self { bytes: [status, 0, 0], len: 1 }
+    }
+
     /// `value`: 0..16383, центр 8192.
     pub fn bend(ch: u8, value: u16) -> Self {
         Self::three(0xE0 | ch, (value & 0x7F) as u8, (value >> 7) as u8)
@@ -47,6 +57,11 @@ impl MidiMsg {
 
     pub fn channel(&self) -> u8 {
         self.bytes[0] & 0x0F
+    }
+
+    /// Системное сообщение (0xF0..0xFF) — не канальное.
+    pub fn is_system(&self) -> bool {
+        self.bytes[0] >= 0xF0
     }
 }
 

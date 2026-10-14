@@ -1,7 +1,7 @@
 //! Поток движка: геймпад → раскладка → синтезатор / MIDI-порт / запись.
 //! Интерфейс общается с ним командами, а состояние получает снимками `Status`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -27,6 +27,16 @@ const STATUS_INTERVAL: Duration = Duration::from_millis(16);
 const AUDIO_RETRY: Duration = Duration::from_secs(2);
 /// За сколько до начала цикла лупера отправлять его события в расписание.
 const LOOP_LOOKAHEAD: Duration = Duration::from_millis(30);
+/// Не чаще одного сообщения в столько на каждый контроллер (CC, подтяжка, давление).
+/// Последнее значение не теряется — оно уходит, как только интервал прошёл.
+const CONTROL_INTERVAL: Duration = Duration::from_millis(5);
+/// Пока идёт сглаживание или относительный контроллер — будить поток так часто.
+const TICK_INTERVAL: Duration = Duration::from_millis(4);
+/// Сколько последних сообщений хранит MIDI-монитор.
+const MONITOR_SIZE: usize = 400;
+/// MMC: Record Strobe и Stop.
+const MMC_RECORD: [u8; 6] = [0xF0, 0x7F, 0x7F, 0x06, 0x06, 0xF7];
+const MMC_STOP: [u8; 6] = [0xF0, 0x7F, 0x7F, 0x06, 0x01, 0xF7];
 
 /// Каким геймпадом играть.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -93,6 +103,8 @@ pub enum Command {
     SetTransport(TransportSettings),
     /// Метроном, лупер — то же, что кнопки геймпада.
     Transport(Action),
+    /// Отправить сообщения (с задержкой в мс) — для MIDI Learn в DAW.
+    SendTest(Vec<(u64, MidiMsg)>),
     Shutdown,
 }
 
@@ -153,6 +165,8 @@ pub struct Status {
     /// Положения стиков и курков.
     pub axes: HashMap<Axis, f32>,
     pub transpose: i32,
+    /// Сдвиг по ступеням от модификаторов.
+    pub degree_shift: i32,
     pub notes: Vec<u8>,
     pub pressed: Vec<SwitchKey>,
     pub parts: Vec<PartStatus>,
@@ -218,11 +232,52 @@ pub struct Touched {
 const TOUCH_ON: f32 = 0.6;
 const TOUCH_OFF: f32 = 0.3;
 
+/// Запись MIDI-монитора: что и когда ушло из программы.
+#[derive(Clone, Debug, Serialize)]
+pub struct MonitorEntry {
+    pub seq: u64,
+    /// Мс от запуска движка.
+    pub ms: f64,
+    pub bytes: Vec<u8>,
+}
+
 /// Данные, которые поток движка публикует для интерфейса.
 #[derive(Default)]
 pub struct Shared {
     pub status: Status,
     pub presets: Vec<PresetInfo>,
+    pub monitor: VecDeque<MonitorEntry>,
+    monitor_seq: u64,
+}
+
+impl Shared {
+    fn log(&mut self, ms: f64, bytes: &[u8]) {
+        self.monitor_seq += 1;
+        if self.monitor.len() >= MONITOR_SIZE {
+            self.monitor.pop_front();
+        }
+        self.monitor.push_back(MonitorEntry { seq: self.monitor_seq, ms, bytes: bytes.to_vec() });
+    }
+}
+
+/// Ограничение частоты одного контроллера.
+struct Throttle {
+    last: Instant,
+    pending: Option<MidiMsg>,
+}
+
+/// Ключ ограничения: (статус, канал, номер CC) — или None, если сообщение не ограничивается.
+/// Не ограничиваются ноты, педали (их быстрые нажатия нельзя «склеивать»), банк, RPN и режимы канала.
+fn throttle_key(m: &MidiMsg) -> Option<(u8, u8, u8)> {
+    match m.status() {
+        0xE0 | 0xD0 => Some((m.status(), m.channel(), 0)),
+        0xB0 => {
+            let cc = m.bytes[1];
+            let exempt = matches!(cc, 0 | 6 | 32 | 38 | 64..=69 | 98..=101 | 120..=127);
+            (!exempt).then_some((0xB0, m.channel(), cc))
+        }
+        _ => None,
+    }
 }
 
 pub struct Engine {
@@ -254,6 +309,11 @@ impl Engine {
 
     pub fn presets(&self) -> Vec<PresetInfo> {
         self.shared.lock().unwrap().presets.clone()
+    }
+
+    /// Сообщения MIDI-монитора новее `since`.
+    pub fn monitor(&self, since: u64) -> Vec<MonitorEntry> {
+        self.shared.lock().unwrap().monitor.iter().filter(|e| e.seq > since).cloned().collect()
     }
 
     /// Остановить движок и дождаться: доиграть note-off, сохранить идущую запись.
@@ -289,6 +349,12 @@ struct Runtime {
     wav_rx: Receiver<Result<String, String>>,
     exporting: usize,
     last_wav: Option<String>,
+    throttle: HashMap<(u8, u8, u8), Throttle>,
+    started: Instant,
+    last_tick: Instant,
+    /// MIDI Clock: номер следующего тика (24 на долю) и шли ли часы в прошлый раз.
+    clock_next_tick: u64,
+    clock_was_running: bool,
     input: Option<GamepadInput>,
     input_error: Option<String>,
     active: Option<u32>,
@@ -333,6 +399,11 @@ impl Runtime {
             wav_rx,
             exporting: 0,
             last_wav: None,
+            throttle: HashMap::new(),
+            started: Instant::now(),
+            last_tick: Instant::now(),
+            clock_next_tick: 0,
+            clock_was_running: false,
             input: None,
             input_error: None,
             active: None,
@@ -388,8 +459,10 @@ impl Runtime {
                 self.on_command(cmd);
             }
             self.check_audio();
+            self.tick_mapper();
             self.tick_transport(Instant::now());
             self.run_scheduled();
+            self.flush_throttled(Instant::now());
             self.poll_exports();
             if self.dirty && last_status.elapsed() >= STATUS_INTERVAL {
                 let status = self.status();
@@ -547,6 +620,12 @@ impl Runtime {
             Command::ToggleRecord => self.toggle_record(),
             Command::SetTransport(ts) => self.set_transport(ts),
             Command::Transport(action) => self.transport_action(action),
+            Command::SendTest(msgs) => {
+                let now = Instant::now();
+                for (delay, msg) in msgs {
+                    self.scheduled.push((now + Duration::from_millis(delay), msg, Source::Audition));
+                }
+            }
             Command::Panic => {
                 self.mapper.panic();
                 self.flush();
@@ -587,7 +666,74 @@ impl Runtime {
         self.outputs.clear();
     }
 
+    /// Отправить сообщение: с ограничением частоты для контроллеров.
     fn dispatch(&mut self, msg: MidiMsg) {
+        if let Some(key) = throttle_key(&msg) {
+            let now = Instant::now();
+            match self.throttle.get_mut(&key) {
+                Some(t) if now.duration_since(t.last) < CONTROL_INTERVAL => {
+                    t.pending = Some(msg);
+                    return;
+                }
+                _ => {
+                    self.throttle.insert(key, Throttle { last: now, pending: None });
+                }
+            }
+        }
+        self.deliver(msg);
+    }
+
+    /// Отправить задержанные контроллеры, чей интервал прошёл.
+    fn flush_throttled(&mut self, now: Instant) {
+        let due: Vec<MidiMsg> = self
+            .throttle
+            .values_mut()
+            .filter(|t| t.pending.is_some() && now.duration_since(t.last) >= CONTROL_INTERVAL)
+            .filter_map(|t| {
+                t.last = now;
+                t.pending.take()
+            })
+            .collect();
+        for msg in due {
+            self.deliver(msg);
+        }
+    }
+
+    /// Только в MIDI-выход (часы, MMC) — синтезатору и записи это не нужно.
+    fn send_out(&mut self, msg: MidiMsg) {
+        if msg.bytes[0] != 0xF8 {
+            let ms = self.started.elapsed().as_secs_f64() * 1000.0;
+            self.shared.lock().unwrap().log(ms, msg.as_slice());
+        }
+        if let Some(out) = &mut self.midi_out {
+            let _ = out.send(msg);
+        }
+    }
+
+    fn send_mmc(&mut self, bytes: &[u8]) {
+        if !self.settings.transport.send_mmc {
+            return;
+        }
+        let ms = self.started.elapsed().as_secs_f64() * 1000.0;
+        self.shared.lock().unwrap().log(ms, bytes);
+        if let Some(out) = &mut self.midi_out {
+            let _ = out.send_raw(bytes);
+        }
+    }
+
+    fn tick_mapper(&mut self) {
+        let now = Instant::now();
+        let dt = now.duration_since(self.last_tick);
+        self.last_tick = now;
+        if self.mapper.needs_tick() {
+            self.mapper.tick(dt);
+            self.flush();
+        }
+    }
+
+    fn deliver(&mut self, msg: MidiMsg) {
+        let ms = self.started.elapsed().as_secs_f64() * 1000.0;
+        self.shared.lock().unwrap().log(ms, msg.as_slice());
         if self.settings.synth_enabled
             && let Some(synth) = &mut self.synth
         {
@@ -747,6 +893,13 @@ impl Runtime {
         }
         consider(self.scheduled.iter().map(|(t, _, _)| *t).min());
         consider(self.looper.next_deadline(LOOP_LOOKAHEAD));
+        consider(self.throttle.values().filter(|t| t.pending.is_some()).map(|t| t.last + CONTROL_INTERVAL).min());
+        if self.mapper.needs_tick() {
+            consider(Some(now + TICK_INTERVAL));
+        }
+        if ts.send_clock && self.clock.running() {
+            consider(self.clock_tick_time(self.clock_next_tick));
+        }
         deadline.saturating_duration_since(now)
     }
 
@@ -758,8 +911,10 @@ impl Runtime {
         if self.record_phase == RecordPhase::CountIn && now >= self.count_in_at {
             self.recorder = Some(Recorder::start_at(self.count_in_at, self.mapper.state_messages()));
             self.record_phase = RecordPhase::Recording;
+            self.send_mmc(&MMC_RECORD);
             self.dirty = true;
         }
+        self.tick_midi_clock(now);
 
         let fx = self.looper.tick(now, LOOP_LOOKAHEAD);
         self.apply_loop(fx);
@@ -780,6 +935,34 @@ impl Runtime {
             if !self.clock_audible() && self.looper.state == LoopState::Empty {
                 self.clock.stop();
             }
+        }
+    }
+
+    fn clock_tick_time(&self, tick: u64) -> Option<Instant> {
+        let ts = &self.settings.transport;
+        let origin = self.clock.beat_time(0, ts)?;
+        Some(origin + ts.beat_len().mul_f64(tick as f64 / 24.0))
+    }
+
+    /// MIDI Clock для DAW: Start при запуске часов, 24 тика на долю, Stop при остановке.
+    fn tick_midi_clock(&mut self, now: Instant) {
+        let running = self.clock.running();
+        if !self.settings.transport.send_clock {
+            self.clock_was_running = running;
+            return;
+        }
+        if running && !self.clock_was_running {
+            self.send_out(MidiMsg::realtime(0xFA));
+            let beats = self.clock.beats(now, &self.settings.transport).unwrap_or(0.0);
+            self.clock_next_tick = (beats * 24.0).ceil() as u64;
+        }
+        if !running && self.clock_was_running {
+            self.send_out(MidiMsg::realtime(0xFC));
+        }
+        self.clock_was_running = running;
+        while running && self.clock_tick_time(self.clock_next_tick).is_some_and(|t| t <= now) {
+            self.send_out(MidiMsg::realtime(0xF8));
+            self.clock_next_tick += 1;
         }
     }
 
@@ -833,7 +1016,7 @@ impl Runtime {
                 let fx = self.looper.clear();
                 self.apply_loop(fx);
             }
-            Action::Panic | Action::NextInstrument { .. } | Action::PrevInstrument { .. } => {}
+            Action::Panic | Action::NextInstrument { .. } | Action::PrevInstrument { .. } | Action::SetProgram { .. } => {}
         }
     }
 
@@ -879,10 +1062,12 @@ impl Runtime {
                 let t0 = self.clock.bar_start(now, &ts).unwrap_or(now);
                 self.recorder = Some(Recorder::start_at(t0, self.mapper.state_messages()));
                 self.record_phase = RecordPhase::Recording;
+                self.send_mmc(&MMC_RECORD);
             }
             RecordPhase::CountIn => self.record_phase = RecordPhase::Idle,
             RecordPhase::Recording => {
                 self.record_phase = RecordPhase::Idle;
+                self.send_mmc(&MMC_STOP);
                 let Some(rec) = self.recorder.take() else { return };
                 if !rec.has_notes() {
                     self.last_recording = None;
@@ -957,6 +1142,7 @@ impl Runtime {
             axes: self.mapper.axis_values(),
             layers: self.mapper.active_layers().iter().map(|l| l.name.clone()).collect(),
             transpose: self.mapper.transpose(),
+            degree_shift: self.mapper.offset().1,
             notes: self.mapper.sounding_notes(),
             pressed: self.mapper.pressed(),
             parts,

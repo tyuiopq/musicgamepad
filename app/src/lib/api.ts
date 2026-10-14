@@ -53,12 +53,21 @@ export type ScalePreset =
   | "locrian"
   | "chromatic";
 
-export type ChordKind = "triad" | "seventh" | "power";
+export type ChordKind = "triad" | "seventh" | "ninth" | "sus2" | "sus4" | "sixth" | "power" | "custom";
 
 export type NoteSpec =
   | { type: "degree"; degree: number }
   | { type: "absolute"; note: number }
-  | { type: "chord"; degree: number; chord: ChordKind };
+  | {
+      type: "chord";
+      degree: number;
+      chord: ChordKind;
+      /** Для custom: интервалы от основного тона в полутонах. */
+      intervals?: number[];
+      inversion?: number;
+      open?: boolean;
+      bass?: boolean;
+    };
 
 export type Latch = "hold" | "toggle";
 export type AxisMode = "bipolar" | "absolute" | "positive" | "negative";
@@ -68,6 +77,8 @@ export interface AxisShape {
   curve: number;
   invert: boolean;
   mode: AxisMode;
+  /** Сглаживание, мс. */
+  smoothing: number;
 }
 
 export type ModEffect =
@@ -84,6 +95,7 @@ export type Command =
   | { type: "toggle_record" }
   | { type: "panic" }
   | { type: "toggle_metronome" }
+  | { type: "set_program"; part: number; program: number; bank: number }
   | { type: "loop_record" }
   | { type: "loop_undo" }
   | { type: "loop_clear" };
@@ -99,6 +111,14 @@ export interface TransportSettings {
   quantize: Quantize;
   loop_bars: number;
   export_wav: boolean;
+  send_clock: boolean;
+  send_mmc: boolean;
+}
+
+export interface MonitorEntry {
+  seq: number;
+  ms: number;
+  bytes: number[];
 }
 
 export type LoopState = "empty" | "armed" | "recording" | "playing" | "overdub";
@@ -126,13 +146,15 @@ export interface RecordingEntry {
 export type ControlTarget =
   | { type: "pitch_bend" }
   | { type: "cc"; cc: number; min: number; max: number }
-  | { type: "velocity"; min: number; max: number };
+  | { type: "velocity"; min: number; max: number }
+  | { type: "pressure"; min: number; max: number };
 
 export type Action =
-  | { kind: "note"; note: NoteSpec; part: number; velocity: number }
+  | { kind: "note"; note: NoteSpec; part: number; velocity: number; latch: Latch }
+  | { kind: "cc"; cc: number; part: number; on: number; off: number; latch: Latch; step: number }
   | { kind: "modifier"; effect: ModEffect; latch: Latch }
   | { kind: "command"; command: Command }
-  | { kind: "control"; target: ControlTarget; shape: AxisShape; part: number };
+  | { kind: "control"; target: ControlTarget; shape: AxisShape; part: number; takeover: boolean; relative: boolean };
 
 export interface Binding {
   input: Input;
@@ -141,7 +163,8 @@ export interface Binding {
 
 /** Что делает вход прямо сейчас (Mapper::preview). */
 export type ControlView = { input: Input; layer: string } & (
-  | { role: "note"; notes: number[]; chord: boolean }
+  | { role: "note"; notes: number[]; chord: boolean; latch: Latch; on: boolean }
+  | { role: "cc"; cc: number; step: number; latch: Latch; on: boolean }
   | { role: "modifier"; effect: ModEffect; latch: Latch; active: boolean }
   | { role: "command"; command: Command }
   | { role: "control"; target: ControlTarget }
@@ -157,6 +180,8 @@ export interface Layer {
   id: string;
   name: string;
   bindings: Binding[];
+  /** Слой-комбинация: включается, когда включены все перечисленные слои. */
+  combo?: string[];
 }
 
 /** Звучание партии: стандартные MIDI-контроллеры, 64 — «как в банке» (кроме панорамы и посылов). */
@@ -218,6 +243,7 @@ export interface Status {
   controls: ControlView[];
   axes: Partial<Record<string, number>>;
   transpose: number;
+  degree_shift: number;
   notes: number[];
   pressed: SwitchKey[];
   parts: PartStatus[];
@@ -280,6 +306,8 @@ export const api = {
   setTransport: (settings: TransportSettings) => invoke<void>("set_transport", { settings }),
   transportAction: (action: Command) => invoke<void>("transport_action", { action }),
   listRecordings: () => invoke<RecordingEntry[]>("list_recordings"),
+  midiMonitor: (since: number) => invoke<MonitorEntry[]>("midi_monitor", { since }),
+  sendTest: (messages: [number, number[]][]) => invoke<void>("send_test", { messages }),
   openRecording: (path: string) => invoke<void>("open_recording", { path }),
   deleteRecording: (name: string) => invoke<void>("delete_recording", { name }),
   panic: () => invoke<void>("panic"),

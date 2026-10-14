@@ -158,6 +158,12 @@
         ><input type="checkbox" checked={ts.export_wav} onchange={(e) => set((s) => (s.export_wav = e.currentTarget.checked))} /> Сохранять
         ещё и WAV</label
       >
+      <label class="check" title="Пока идёт метроном или лупер — 24 тика на долю, Start при запуске, Stop при остановке. В Ableton: Preferences → Link/Tempo/MIDI → у входа включить Sync">
+        <input type="checkbox" checked={ts.send_clock} onchange={(e) => set((s) => (s.send_clock = e.currentTarget.checked))} /> MIDI Clock в DAW
+      </label>
+      <label class="check" title="Record/Stop через MIDI Machine Control. Понимают, например, Reaper и Cubase; Ableton — нет (для него назначь CC-кнопку через MIDI Map)">
+        <input type="checkbox" checked={ts.send_mmc} onchange={(e) => set((s) => (s.send_mmc = e.currentTarget.checked))} /> MMC (запись в DAW)
+      </label>
       <label class="field">
         <span class="muted">Громкость метронома</span>
         <input

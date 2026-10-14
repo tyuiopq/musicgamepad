@@ -1,6 +1,6 @@
 <script lang="ts">
   // Панель настроек выбранного контрола: все его входы (слоты) в редактируемом слое.
-  import type { Binding, Layer, PadFamily, Profile } from "$lib/api";
+  import type { Binding, Layer, PadFamily, PresetInfo, Profile } from "$lib/api";
   import { slotsOf, type ControlId } from "$lib/controls";
   import { keyLabel } from "$lib/labels";
   import { findBinding } from "$lib/profileEdit";
@@ -12,6 +12,8 @@
     profile,
     family,
     axes,
+    presets,
+    midiPort,
     onchange,
     onnewlayer,
   }: {
@@ -20,6 +22,8 @@
     profile: Profile;
     family: PadFamily;
     axes: Partial<Record<string, number>>;
+    presets: PresetInfo[];
+    midiPort: string | null;
     onchange: (slotInput: Binding["input"], b: Binding | null) => void;
     onnewlayer: () => string;
   } = $props();
@@ -53,6 +57,8 @@
       inheritedLayer={base.name}
       {profile}
       axisValue={axis ? (axes[axis] ?? 0) : 0}
+      {presets}
+      {midiPort}
       onchange={(b) => onchange(slot.input, b)}
       {onnewlayer}
     />

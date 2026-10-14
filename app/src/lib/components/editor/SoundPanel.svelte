@@ -141,6 +141,28 @@
         <button type="button" class="primary" onclick={() => onaudition(index)}>▶ Послушать</button>
       </div>
       <p class="instrument">{presetName(presets, part.bank, part.program)}</p>
+      <label class="channel">
+        <span>MIDI-канал</span>
+        <select
+          value={part.channel}
+          onchange={(e) => {
+            const ch = Number(e.currentTarget.value);
+            edit((p) => {
+              p.channel = ch;
+              if (ch === 9 && p.bank !== 128) p.bank = 128;
+              if (ch !== 9 && p.bank === 128) p.bank = 0;
+            });
+          }}
+        >
+          {#each Array.from({ length: 16 }, (_, i) => i) as ch (ch)}
+            {@const owner = profile.parts.find((x, j) => x.channel === ch && j !== index)}
+            <option value={ch}>{ch + 1}{ch === 9 ? " — ударные (GM)" : ""}{owner ? ` — занят: ${owner.name}` : ""}</option>
+          {/each}
+        </select>
+      </label>
+      {#if profile.parts.some((x, j) => x.channel === part.channel && j !== index)}
+        <p class="hint warn">На этом канале уже есть партия: инструменты будут мешать друг другу.</p>
+      {/if}
 
       {@render slider("Громкость", part.volume, (v) => edit((p) => (p.volume = v)), percent(part.volume))}
       {#each SLIDERS as s (s.key)}
@@ -259,6 +281,26 @@
     font-family: var(--font-display);
     font-size: 18px;
     color: var(--accent);
+  }
+  .channel {
+    display: grid;
+    grid-template-columns: 120px 1fr;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .channel select {
+    font: inherit;
+    color: var(--text);
+    min-height: 34px;
+    padding: 0 8px;
+    border-radius: 8px;
+    border: 1px solid var(--line-strong);
+    background: var(--raised);
+  }
+  .warn {
+    color: var(--error);
   }
   .slider {
     display: grid;

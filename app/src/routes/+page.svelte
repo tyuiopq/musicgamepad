@@ -3,6 +3,7 @@
   import { api, demoOption, type PadFamily, type Profile, type ProfileEntry, type Status } from "$lib/api";
   import Editor from "$lib/components/editor/Editor.svelte";
   import Gamepad from "$lib/components/Gamepad.svelte";
+  import Monitor from "$lib/components/Monitor.svelte";
   import PianoRoll from "$lib/components/PianoRoll.svelte";
   import Recordings from "$lib/components/Recordings.svelte";
   import Sidebar from "$lib/components/Sidebar.svelte";
@@ -17,6 +18,18 @@
   let error = $state<string | null>(null);
   let view = $state<"play" | "edit" | "records">((demoOption("view") as "edit" | "records" | null) ?? "play");
   let editorDirty = $state(false);
+  let bottom = $state<"roll" | "monitor">(demoOption("bottom") === "monitor" ? "monitor" : "roll");
+
+  /** Суммарный сдвиг от модификаторов: «−12 пт · +1 ступ.» */
+  const offsetText = $derived.by(() => {
+    if (!status) return "";
+    const parts: string[] = [];
+    const t = status.transpose;
+    if (t) parts.push(`${t > 0 ? "+" : "−"}${Math.abs(t)} пт.`);
+    const d = status.degree_shift;
+    if (d) parts.push(`${d > 0 ? "+" : "−"}${Math.abs(d)} ступ.`);
+    return parts.join(" · ");
+  });
 
   async function refreshProfiles() {
     profiles = await api.profiles();
@@ -101,7 +114,13 @@
           {#each activeMods as m (m.key + m.label)}
             <span class="chip mod">{m.key} · {m.label}</span>
           {/each}
+          {#if offsetText}
+            <span class="chip offset" title="Суммарный сдвиг от зажатых модификаторов">Сдвиг: {offsetText}</span>
+          {/if}
         </div>
+        <button type="button" class="panic" title="Заглушить все ноты и сбросить защёлки (All Notes Off)" onclick={() => run(api.panic)}>
+          Тишина
+        </button>
       </header>
 
       {#if error}<p class="error">{error}</p>{/if}
@@ -116,11 +135,19 @@
       <Transport transport={status.transport} {run} />
 
       <section class="roll">
-        <div class="roll-head">
-          <span class="section-title">Последние ноты</span>
-          <span class="muted">10 с</span>
+        <div class="roll-head" role="tablist" aria-label="Нижняя панель">
+          <button type="button" role="tab" aria-selected={bottom === "roll"} class:on={bottom === "roll"} onclick={() => (bottom = "roll")}>
+            Последние ноты
+          </button>
+          <button type="button" role="tab" aria-selected={bottom === "monitor"} class:on={bottom === "monitor"} onclick={() => (bottom = "monitor")}>
+            MIDI-монитор
+          </button>
         </div>
-        <PianoRoll notes={status.notes} {tonic} />
+        {#if bottom === "roll"}
+          <PianoRoll notes={status.notes} {tonic} />
+        {:else}
+          <Monitor />
+        {/if}
       </section>
       {/if}
       {#if view === "records"}
@@ -203,9 +230,42 @@
     border-radius: 14px;
     padding: 12px 14px 14px;
   }
+  .panic {
+    margin-left: auto;
+    min-height: 38px;
+    padding: 0 16px;
+    border-radius: 10px;
+    border: 1px solid var(--line-strong);
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+  }
+  .panic:hover {
+    border-color: var(--error);
+    color: var(--error);
+  }
+  .chip.offset {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .roll-head button {
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .roll-head button.on {
+    color: var(--text);
+  }
   .roll-head {
     display: flex;
-    justify-content: space-between;
+    gap: 18px;
     font-size: 12px;
   }
   .roll :global(.roll) {

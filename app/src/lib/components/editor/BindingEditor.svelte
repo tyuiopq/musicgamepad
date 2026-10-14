@@ -1,13 +1,14 @@
 <script lang="ts">
   // Настройка одного входа: роль (нота, аккорд, модификатор, команда, контроллер) и её параметры.
-  import type { Action, AxisMode, AxisShape, Binding, ChordKind, Command, ControlTarget, ModEffect, Profile } from "$lib/api";
+  import { api, type Action, type AxisMode, type AxisShape, type Binding, type ChordKind, type Command, type ControlTarget, type Latch, type ModEffect, type PresetInfo, type Profile } from "$lib/api";
   import type { Slot } from "$lib/controls";
   import { DEFAULT_THRESHOLD } from "$lib/controls";
   import { effectLabel } from "$lib/describe";
   import { noteName, solfege } from "$lib/labels";
   import { CHORD_DEGREES, degreeNote, scaleSteps } from "$lib/music";
   import { defaultAction, roleOf, type Role } from "$lib/profileEdit";
-  import { drumName, isDrums } from "$lib/sound";
+  import { drumName, isDrums, presetName } from "$lib/sound";
+  import { voice } from "$lib/music";
   import ShapeCurve from "./ShapeCurve.svelte";
 
   let {
@@ -17,6 +18,8 @@
     inheritedLayer,
     profile,
     axisValue = 0,
+    presets = [],
+    midiPort = null,
     onchange,
     onnewlayer,
   }: {
@@ -26,6 +29,9 @@
     inheritedLayer: string | null;
     profile: Profile;
     axisValue?: number;
+    presets?: PresetInfo[];
+    /** Куда сейчас уходит MIDI — для подсказки у кнопки MIDI Learn. */
+    midiPort?: string | null;
     onchange: (b: Binding | null) => void;
     onnewlayer: () => string;
   } = $props();
@@ -44,6 +50,7 @@
         ["none", "Ничего"],
         ["note", "Нота"],
         ["chord", "Аккорд"],
+        ["cc", "CC"],
         ["modifier", "Модификатор"],
         ["command", "Команда"],
       ],
@@ -85,7 +92,35 @@
   const CHORDS: [ChordKind, string][] = [
     ["triad", "Трезвучие"],
     ["seventh", "Септаккорд"],
-    ["power", "Квинта"],
+    ["ninth", "Нонаккорд"],
+    ["sixth", "Секстаккорд"],
+    ["sus2", "Sus2"],
+    ["sus4", "Sus4"],
+    ["power", "Квинта (power)"],
+    ["custom", "Свои интервалы"],
+  ];
+
+  /** Звуки аккорда — как в ядре (theory::voice). */
+  function chordNotes(note: Extract<Action, { kind: "note" }>["note"]): number[] {
+    if (note.type !== "chord") return [];
+    const root = degreeNote(profile.music, note.degree);
+    const tones =
+      note.chord === "custom"
+        ? (note.intervals?.length ? note.intervals : [0, 4, 7]).map((i) => root + i)
+        : CHORD_DEGREES[note.chord].map((d) => degreeNote(profile.music, note.degree + d));
+    return voice(tones, note.inversion ?? 0, note.open ?? false, note.bass ?? false);
+  }
+
+  function parseIntervals(text: string): number[] {
+    return text
+      .split(/[\s,;]+/)
+      .map(Number)
+      .filter((n) => Number.isInteger(n) && n >= -24 && n <= 36);
+  }
+
+  const LATCH: [Latch, string][] = [
+    ["hold", "Пока зажата"],
+    ["toggle", "Защёлка"],
   ];
 
   // ---------- модификаторы ----------
@@ -124,6 +159,7 @@
     ["toggle_record", "Запись: старт/стоп"],
     ["panic", "Тишина (заглушить всё)"],
     ["toggle_metronome", "Метроном: вкл/выкл"],
+    ["set_program", "Выбрать инструмент (Program Change)"],
     ["loop_record", "Лупер: записать / наложить слой"],
     ["loop_undo", "Лупер: отменить слой"],
     ["loop_clear", "Лупер: очистить"],
@@ -132,26 +168,30 @@
   function setCommand(type: Command["type"]) {
     edit((a) => {
       if (a.kind !== "command") return;
-      a.command = type === "next_instrument" || type === "prev_instrument" ? { type, part: 0 } : ({ type } as Command);
+      if (type === "next_instrument" || type === "prev_instrument") a.command = { type, part: 0 };
+      else if (type === "set_program") a.command = { type, part: 0, program: profile.parts[0].program, bank: profile.parts[0].bank };
+      else a.command = { type } as Command;
     });
   }
 
   // ---------- контроллеры ----------
-  type TargetKey = "pitch_bend" | "cc1" | "cc11" | "cc74" | "cc64" | "cc" | "velocity";
+  type TargetKey = "pitch_bend" | "cc1" | "cc11" | "cc74" | "cc64" | "cc" | "velocity" | "pressure";
   const TARGETS: [TargetKey, string][] = [
-    ["pitch_bend", "Подтяжка"],
-    ["cc1", "Вибрато"],
-    ["cc11", "Громкость"],
-    ["cc74", "Яркость"],
-    ["cc64", "Педаль"],
-    ["cc", "Другой CC"],
-    ["velocity", "Сила нажатия"],
+    ["pitch_bend", "Подтяжка (Pitch Bend)"],
+    ["cc1", "Вибрато / Mod Wheel (CC1)"],
+    ["cc11", "Экспрессия (CC11)"],
+    ["cc74", "Яркость (CC74)"],
+    ["cc64", "Педаль (CC64)"],
+    ["cc", "Другой CC…"],
+    ["pressure", "Давление (Aftertouch)"],
+    ["velocity", "Сила следующих нот"],
   ];
   const PRESET_CC = [1, 11, 74, 64];
 
   function targetKey(t: ControlTarget): TargetKey {
     if (t.type === "pitch_bend") return "pitch_bend";
     if (t.type === "velocity") return "velocity";
+    if (t.type === "pressure") return "pressure";
     return PRESET_CC.includes(t.cc) ? (`cc${t.cc}` as TargetKey) : "cc";
   }
 
@@ -160,6 +200,7 @@
       if (a.kind !== "control") return;
       if (k === "pitch_bend") a.target = { type: "pitch_bend" };
       else if (k === "velocity") a.target = { type: "velocity", min: 30, max: 127 };
+      else if (k === "pressure") a.target = { type: "pressure", min: 0, max: 127 };
       else if (k === "cc") a.target = { type: "cc", cc: 2, min: 0, max: 127 };
       else a.target = { type: "cc", cc: Number(k.slice(2)), min: k === "cc11" ? 40 : 0, max: 127 };
     });
@@ -187,20 +228,65 @@
         ],
   );
 
-  const actionPart = $derived(action && (action.kind === "note" || action.kind === "control") ? action.part : 0);
+  const actionPart = $derived(action && (action.kind === "note" || action.kind === "control" || action.kind === "cc") ? action.part : 0);
   const bendRange = $derived(profile.parts[actionPart]?.bend_range ?? 2);
   const drumPart = $derived(isDrums(profile.parts[actionPart]));
 
   /** Сменить партию; для ударных нота становится конкретной (бочка), т.к. лад им не подходит. */
   function setPart(i: number) {
     edit((a) => {
-      if (a.kind !== "note" && a.kind !== "control") return;
+      if (a.kind !== "note" && a.kind !== "control" && a.kind !== "cc") return;
       a.part = i;
       if (a.kind === "note" && isDrums(profile.parts[i]) && a.note.type !== "absolute") {
         a.note = { type: "absolute", note: 36 };
       }
     });
   }
+
+  // ---------- MIDI Learn ----------
+  /** Сообщения, которые узнает DAW при «MIDI Learn»: то же, что шлёт этот контрол. */
+  function learnMessages(): [number, number[]][] {
+    if (!action) return [];
+    const ch = profile.parts[actionPart]?.channel ?? 0;
+    const shift = profile.parts[actionPart]?.transpose ?? 0;
+    switch (action.kind) {
+      case "note": {
+        const n = action.note;
+        const notes =
+          n.type === "degree" ? [degreeNote(profile.music, n.degree) + shift] : n.type === "absolute" ? [n.note] : chordNotes(n).map((x) => x + shift);
+        const first = Math.min(127, Math.max(0, notes[0]));
+        return [
+          [0, [0x90 | ch, first, 100]],
+          [250, [0x80 | ch, first, 0]],
+        ];
+      }
+      case "cc":
+        return action.step
+          ? [[0, [0xb0 | ch, action.cc, 64]]]
+          : [
+              [0, [0xb0 | ch, action.cc, action.on]],
+              [150, [0xb0 | ch, action.cc, action.off]],
+            ];
+      case "control": {
+        const t = action.target;
+        if (t.type === "cc")
+          return [
+            [0, [0xb0 | ch, t.cc, 64]],
+            [60, [0xb0 | ch, t.cc, 66]],
+          ];
+        if (t.type === "pressure") return [[0, [0xd0 | ch, 64]]];
+        if (t.type === "pitch_bend")
+          return [
+            [0, [0xe0 | ch, 0, 0x50]],
+            [120, [0xe0 | ch, 0, 0x40]],
+          ];
+        return [];
+      }
+      default:
+        return [];
+    }
+  }
+  const canLearn = $derived(learnMessages().length > 0);
 
   function noteText(n: number): string {
     const drum = drumPart ? drumName(n) : null;
@@ -287,6 +373,7 @@
       <p class="hint">{drumPart ? "Звук ударной установки." : "Не зависит от лада — удобно для ударных."}</p>
     {/if}
     {@render range("Сила", action.velocity, 1, 127, 1, (v) => edit((a) => a.kind === "note" && (a.velocity = v)), String(action.velocity))}
+    {@render seg(LATCH, action.latch ?? "hold", (l) => edit((a) => a.kind === "note" && (a.latch = l)))}
   {:else if action?.kind === "note" && action.note.type === "chord"}
     {@const note = action.note}
     {@render stepper(
@@ -296,11 +383,56 @@
       (v) => edit((a) => a.kind === "note" && a.note.type === "chord" && (a.note.degree = v)),
       `от ${degreeText(note.degree)}`,
     )}
-    {@render seg(CHORDS, note.chord, (c) => edit((a) => a.kind === "note" && a.note.type === "chord" && (a.note.chord = c)))}
-    <p class="result">
-      {CHORD_DEGREES[note.chord].map((d) => noteName(degreeNote(profile.music, note.degree + d))).join(" · ")}
-    </p>
+    <select
+      aria-label="Вид аккорда"
+      value={note.chord}
+      onchange={(e) => {
+        const c = e.currentTarget.value as ChordKind;
+        edit((a) => {
+          if (a.kind === "note" && a.note.type === "chord") {
+            a.note.chord = c;
+            if (c === "custom" && !a.note.intervals?.length) a.note.intervals = [0, 4, 7, 11];
+          }
+        });
+      }}
+    >
+      {#each CHORDS as [k, text] (k)}<option value={k}>{text}</option>{/each}
+    </select>
+    {#if note.chord === "custom"}
+      <label class="part">
+        <span>Интервалы</span>
+        <input
+          class="text"
+          value={(note.intervals ?? []).join(" ")}
+          placeholder="0 4 7 11"
+          title="Полутоны от основного тона через пробел: 0 4 7 — мажор, 0 3 7 — минор, 0 4 7 11 — maj7"
+          onchange={(e) => {
+            const iv = parseIntervals(e.currentTarget.value);
+            edit((a) => a.kind === "note" && a.note.type === "chord" && (a.note.intervals = iv.length ? iv : [0, 4, 7]));
+          }}
+        />
+      </label>
+    {/if}
+    {@render stepper(
+      note.inversion ?? 0,
+      0,
+      3,
+      (v) => edit((a) => a.kind === "note" && a.note.type === "chord" && (a.note.inversion = v)),
+      (note.inversion ?? 0) === 0 ? "Основной вид" : `${note.inversion}-е обращение`,
+    )}
+    <div class="checks">
+      <label class="check">
+        <input type="checkbox" checked={note.open ?? false} onchange={(e) => edit((a) => a.kind === "note" && a.note.type === "chord" && (a.note.open = e.currentTarget.checked))} />
+        Широкое расположение
+      </label>
+      <label class="check">
+        <input type="checkbox" checked={note.bass ?? false} onchange={(e) => edit((a) => a.kind === "note" && a.note.type === "chord" && (a.note.bass = e.currentTarget.checked))} />
+        Бас октавой ниже
+      </label>
+    </div>
+    <p class="result">{chordNotes(note).map(noteName).join(" · ")}</p>
     {@render range("Сила", action.velocity, 1, 127, 1, (v) => edit((a) => a.kind === "note" && (a.velocity = v)), String(action.velocity))}
+    {@render seg(LATCH, action.latch ?? "hold", (l) => edit((a) => a.kind === "note" && (a.latch = l)))}
   {:else if action?.kind === "modifier"}
     {@const effect = action.effect}
     <div class="grid">
@@ -394,6 +526,41 @@
           ? `По быстрому списку партии: ${list.length} инстр.`
           : "Быстрый список партии пуст — отметь инструменты звёздочкой во вкладке «Звук»."}
       </p>
+    {:else if command.type === "set_program"}
+      <select
+        aria-label="Инструмент"
+        value={`${command.bank}:${command.program}`}
+        onchange={(e) => {
+          const [bank, program] = e.currentTarget.value.split(":").map(Number);
+          edit((a) => {
+            if (a.kind === "command" && a.command.type === "set_program") {
+              a.command.bank = bank;
+              a.command.program = program;
+            }
+          });
+        }}
+      >
+        {#each presets as p (`${p.bank}:${p.program}`)}
+          <option value={`${p.bank}:${p.program}`}>{p.program + 1}. {p.name}{p.bank ? ` (банк ${p.bank})` : ""}</option>
+        {:else}
+          {#each Array.from({ length: 128 }, (_, i) => i) as i (i)}<option value={`0:${i}`}>Программа {i + 1}</option>{/each}
+        {/each}
+      </select>
+      {#if profile.parts.length > 1}
+        <label class="part">
+          <span>Партия</span>
+          <select
+            value={command.part}
+            onchange={(e) => {
+              const i = Number(e.currentTarget.value);
+              edit((a) => a.kind === "command" && a.command.type === "set_program" && (a.command.part = i));
+            }}
+          >
+            {#each profile.parts as p, i (i)}<option value={i}>{p.name}</option>{/each}
+          </select>
+        </label>
+      {/if}
+      <p class="hint">Шлёт Program Change: и встроенному звуку, и синту в DAW. Сейчас: {presetName(presets, command.bank, command.program)}.</p>
     {/if}
   {:else if action?.kind === "control"}
     {@const target = action.target}
@@ -416,11 +583,61 @@
       <div class="curve-controls">
         {@render range("Мёртвая зона", shape.deadzone, 0, 0.5, 0.01, (v) => setShape((s) => (s.deadzone = v)), `${Math.round(shape.deadzone * 100)}%`)}
         {@render range("Кривая", shape.curve, 0.3, 3, 0.05, (v) => setShape((s) => (s.curve = v)), shape.curve.toFixed(2))}
+        {@render range("Сглаживание", shape.smoothing ?? 0, 0, 200, 5, (v) => setShape((s) => (s.smoothing = v)), shape.smoothing ? `${shape.smoothing} мс` : "нет")}
         <label class="check">
           <input type="checkbox" checked={shape.invert} onchange={(e) => setShape((s) => (s.invert = e.currentTarget.checked))} />
           Наоборот
         </label>
       </div>
+    </div>
+    {#if target.type !== "velocity"}
+      <label class="check" title="После смены слоя значение не прыгает к положению стика: стик сначала должен «догнать» прежнее значение">
+        <input type="checkbox" checked={action.takeover} onchange={(e) => edit((a) => a.kind === "control" && (a.takeover = e.currentTarget.checked))} />
+        Подхват (soft takeover)
+      </label>
+    {/if}
+    {#if target.type === "cc" || target.type === "pressure"}
+      <label class="check" title="Отклонение задаёт скорость изменения: отпустил стик — значение осталось">
+        <input type="checkbox" checked={action.relative} onchange={(e) => edit((a) => a.kind === "control" && (a.relative = e.currentTarget.checked))} />
+        Относительный режим: стик крутит значение, а не задаёт его
+      </label>
+    {/if}
+  {:else if action?.kind === "cc"}
+    {@const cc = action}
+    {@render stepper(cc.cc, 0, 127, (v) => edit((a) => a.kind === "cc" && (a.cc = v)), `CC ${cc.cc}`)}
+    {@render seg(
+      [
+        ["hold", "Пока зажата"],
+        ["toggle", "Переключатель"],
+        ["step", "Шаг +/−"],
+      ],
+      cc.step ? "step" : cc.latch,
+      (m) =>
+        edit((a) => {
+          if (a.kind !== "cc") return;
+          if (m === "step") a.step = a.step || 8;
+          else {
+            a.step = 0;
+            a.latch = m as Latch;
+          }
+        }),
+    )}
+    {#if cc.step}
+      {@render stepper(cc.step, -64, 64, (v) => edit((a) => a.kind === "cc" && (a.step = v === 0 ? (cc.step > 0 ? -1 : 1) : v)), `${cc.step > 0 ? "+" : ""}${cc.step} за нажатие`)}
+      <p class="hint">Каждое нажатие прибавляет шаг к текущему значению — удобно для «больше/меньше».</p>
+    {:else}
+      {@render range("Нажата", cc.on, 0, 127, 1, (v) => edit((a) => a.kind === "cc" && (a.on = v)), String(cc.on))}
+      {@render range("Отпущена", cc.off, 0, 127, 1, (v) => edit((a) => a.kind === "cc" && (a.off = v)), String(cc.off))}
+      <p class="hint">В Ableton: Ctrl+M → кликни Play, Record или любую кнопку → нажми эту кнопку геймпада.</p>
+    {/if}
+  {/if}
+
+  {#if canLearn}
+    <div class="learn">
+      <button type="button" class="ghost" onclick={() => api.sendTest(learnMessages())}>Отправить для MIDI Learn</button>
+      <span class="hint">
+        {midiPort ? `В DAW включи режим обучения, выбери параметр и нажми — уйдёт ровно это сообщение в «${midiPort}».` : "Сначала выбери MIDI-выход в боковой панели."}
+      </span>
     </div>
   {/if}
 
@@ -560,6 +777,41 @@
     border-radius: 8px;
     border: 1px solid var(--line-strong);
     background: var(--raised);
+  }
+  .checks {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+  }
+  .text {
+    font: inherit;
+    color: var(--text);
+    min-height: 34px;
+    padding: 0 10px;
+    border-radius: 8px;
+    border: 1px solid var(--line-strong);
+    background: var(--raised);
+    min-width: 0;
+  }
+  .learn {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding-top: 6px;
+    border-top: 1px dashed var(--line);
+  }
+  .ghost {
+    align-self: flex-start;
+    min-height: 34px;
+    padding: 0 12px;
+    border-radius: 8px;
+    border: 1px solid var(--line-strong);
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+  }
+  .ghost:hover {
+    border-color: var(--accent);
   }
   .curve {
     display: flex;

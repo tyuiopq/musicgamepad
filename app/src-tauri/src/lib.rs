@@ -283,6 +283,29 @@ fn delete_recording(state: State<AppState>, name: String) -> CmdResult<()> {
     Ok(())
 }
 
+/// Последние сообщения MIDI-монитора (новее `since`).
+#[tauri::command]
+fn midi_monitor(state: State<AppState>, since: u64) -> Vec<engine::engine::MonitorEntry> {
+    state.engine.monitor(since)
+}
+
+/// Отправить пробные сообщения для MIDI Learn в DAW: (задержка мс, байты).
+#[tauri::command]
+fn send_test(state: State<AppState>, messages: Vec<(u64, Vec<u8>)>) -> CmdResult<()> {
+    let mut out = Vec::new();
+    for (delay, bytes) in messages {
+        let ok = (2..=3).contains(&bytes.len()) && (0x80..0xF0).contains(&bytes[0]) && bytes[1..].iter().all(|b| *b < 0x80);
+        if !ok {
+            return Err(format!("неверное MIDI-сообщение: {bytes:?}"));
+        }
+        let mut b = [0u8; 3];
+        b[..bytes.len()].copy_from_slice(&bytes);
+        out.push((delay.min(5000), engine::midi::MidiMsg { bytes: b, len: bytes.len() as u8 }));
+    }
+    state.engine.send(Command::SendTest(out));
+    Ok(())
+}
+
 #[tauri::command]
 fn toggle_record(state: State<AppState>) {
     state.engine.send(Command::ToggleRecord);
@@ -367,6 +390,8 @@ pub fn run() {
             save_profile,
             delete_profile,
             toggle_record,
+            midi_monitor,
+            send_test,
             set_transport,
             transport_action,
             list_recordings,

@@ -53,8 +53,24 @@ export function degreeNote(m: Music, degree: number): number {
   return tonic(m) + steps[i] + 12 * Math.floor(degree / n);
 }
 
+/** Ступени аккордов — как ChordKind::degrees в ядре. */
 export const CHORD_DEGREES: Record<string, number[]> = {
   triad: [0, 2, 4],
   seventh: [0, 2, 4, 6],
+  ninth: [0, 2, 4, 6, 8],
+  sus2: [0, 1, 4],
+  sus4: [0, 3, 4],
+  sixth: [0, 2, 4, 5],
   power: [0, 4, 7],
+  custom: [0],
 };
+
+/** Расположение аккорда — как theory::voice в ядре. */
+export function voice(tones: number[], inversion: number, open: boolean, bass: boolean): number[] {
+  const t = [...tones].sort((a, b) => a - b);
+  const root = t[0];
+  for (let i = 0; i < Math.min(inversion, t.length - 1); i++) t.push((t.shift() as number) + 12);
+  if (open && t.length >= 3) t[1] += 12;
+  if (bass && root !== undefined) t.push(root - 12);
+  return [...new Set(t)].sort((a, b) => a - b);
+}

@@ -66,9 +66,34 @@ impl ChordKind {
         match self {
             ChordKind::Triad => &[0, 2, 4],
             ChordKind::Seventh => &[0, 2, 4, 6],
+            ChordKind::Ninth => &[0, 2, 4, 6, 8],
+            ChordKind::Sus2 => &[0, 1, 4],
+            ChordKind::Sus4 => &[0, 3, 4],
+            ChordKind::Sixth => &[0, 2, 4, 5],
             ChordKind::Power => &[0, 4, 7],
+            ChordKind::Custom => &[0],
         }
     }
+}
+
+/// Расположение аккорда: обращение (нижние звуки вверх на октаву), широкое расположение
+/// (второй снизу звук на октаву выше) и бас (основной тон октавой ниже).
+pub fn voice(mut tones: Vec<i32>, inversion: u8, open: bool, bass: bool) -> Vec<i32> {
+    tones.sort_unstable();
+    let root = tones.first().copied();
+    for _ in 0..(inversion as usize).min(tones.len().saturating_sub(1)) {
+        let low = tones.remove(0);
+        tones.push(low + 12);
+    }
+    if open && tones.len() >= 3 {
+        tones[1] += 12;
+    }
+    if bass && let Some(r) = root {
+        tones.push(r - 12);
+    }
+    tones.sort_unstable();
+    tones.dedup();
+    tones
 }
 
 #[cfg(test)]
@@ -100,6 +125,18 @@ mod tests {
         let s = Scale::Custom { steps: vec![7, 0, 12, 3] };
         assert_eq!(s.steps(), [0, 3, 7]);
         assert_eq!(Scale::Custom { steps: vec![] }.steps().len(), 7);
+    }
+
+    #[test]
+    fn voicings() {
+        // до-мажорное трезвучие C4-E4-G4
+        let c = vec![60, 64, 67];
+        assert_eq!(voice(c.clone(), 0, false, false), [60, 64, 67]);
+        assert_eq!(voice(c.clone(), 1, false, false), [64, 67, 72], "первое обращение");
+        assert_eq!(voice(c.clone(), 2, false, false), [67, 72, 76], "второе обращение");
+        assert_eq!(voice(c.clone(), 9, false, false), [67, 72, 76], "обращений не больше, чем звуков минус один");
+        assert_eq!(voice(c.clone(), 0, true, false), [60, 67, 76], "широкое расположение");
+        assert_eq!(voice(c, 0, false, true), [48, 60, 64, 67], "бас");
     }
 
     #[test]

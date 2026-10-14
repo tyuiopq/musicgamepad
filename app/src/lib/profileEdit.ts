@@ -2,7 +2,7 @@
 import type { Action, Binding, Input, Layer, Profile } from "./api";
 import { sameInput } from "./describe";
 
-export type Role = "none" | "note" | "chord" | "modifier" | "command" | "control";
+export type Role = "none" | "note" | "chord" | "cc" | "modifier" | "command" | "control";
 
 export function findBinding(layer: Layer, input: Input): Binding | undefined {
   return layer.bindings.find((b) => sameInput(b.input, input));
@@ -35,9 +35,11 @@ export function defaultAction(role: Role, input: Input): Action | null {
     case "none":
       return null;
     case "note":
-      return { kind: "note", note: { type: "degree", degree: 0 }, part: 0, velocity: 100 };
+      return { kind: "note", note: { type: "degree", degree: 0 }, part: 0, velocity: 100, latch: "hold" };
     case "chord":
-      return { kind: "note", note: { type: "chord", degree: 0, chord: "triad" }, part: 0, velocity: 90 };
+      return { kind: "note", note: { type: "chord", degree: 0, chord: "triad" }, part: 0, velocity: 90, latch: "hold" };
+    case "cc":
+      return { kind: "cc", cc: 64, part: 0, on: 127, off: 0, latch: "hold", step: 0 };
     case "modifier":
       return { kind: "modifier", effect: { type: "semitones", semitones: 1 }, latch: "hold" };
     case "command":
@@ -47,9 +49,11 @@ export function defaultAction(role: Role, input: Input): Action | null {
         kind: "control",
         target: { type: "cc", cc: 1, min: 0, max: 127 },
         shape: isTrigger(input)
-          ? { deadzone: 0.02, curve: 1, invert: false, mode: "positive" }
-          : { deadzone: 0.15, curve: 1, invert: false, mode: "bipolar" },
+          ? { deadzone: 0.02, curve: 1, invert: false, mode: "positive", smoothing: 0 }
+          : { deadzone: 0.15, curve: 1, invert: false, mode: "bipolar", smoothing: 0 },
         part: 0,
+        takeover: false,
+        relative: false,
       };
   }
 }
