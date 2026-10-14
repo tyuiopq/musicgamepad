@@ -51,6 +51,23 @@ pub enum PadChoice {
     Auto,
     /// Только этот (по названию — переживает переподключение).
     Fixed { name: String },
+    /// Все сразу: основной играет профилем на экране, остальные — своими (или тем же).
+    All,
+}
+
+/// Дополнительный геймпад в режиме «все сразу»: своя раскладка со своими зажатыми кнопками.
+struct Guest {
+    pad: u32,
+    mapper: Mapper,
+    /// Профиль назначен этому геймпаду (иначе — копия основного, обновляется вместе с ним).
+    assigned: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct GuestStatus {
+    pub pad: u32,
+    pub profile: String,
+    pub notes: Vec<u8>,
 }
 
 /// Настройки, которые приложение сохраняет между запусками.
@@ -77,6 +94,8 @@ pub struct Settings {
     pub calibration: HashMap<String, Calibration>,
     /// MIDI-вход, с которого брать темп и Start/Stop (MIDI Clock от DAW).
     pub clock_in: Option<String>,
+    /// Режим «все геймпады сразу»: каким профилем играет дополнительный геймпад (ключ → имя профиля).
+    pub pad_assign: HashMap<String, String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -104,6 +123,7 @@ impl Default for Settings {
             instruments: HashMap::new(),
             calibration: HashMap::new(),
             clock_in: None,
+            pad_assign: HashMap::new(),
         }
     }
 }
@@ -122,6 +142,8 @@ pub enum Command {
     SetPadChoice(PadChoice),
     /// Откуда принимать MIDI Clock (None — не принимать, темп свой).
     SetClockIn(Option<String>),
+    /// Профили дополнительных геймпадов: ключ геймпада (`PadInfo::key`) → профиль.
+    SetGuestProfiles(HashMap<String, Profile>),
     /// Калибровка геймпада с этим именем (None — сбросить).
     SetCalibration { pad: String, calibration: Option<Calibration> },
     SetSynthEnabled(bool),
@@ -216,6 +238,8 @@ pub struct Status {
     pub controls: Vec<ControlView>,
     /// Положения стиков и курков.
     pub axes: HashMap<Axis, f32>,
+    /// Дополнительные геймпады в режиме «все сразу».
+    pub guests: Vec<GuestStatus>,
     /// Те же оси до калибровки — для мастера калибровки.
     pub raw_axes: HashMap<Axis, f32>,
     pub transpose: i32,
@@ -481,7 +505,9 @@ struct Runtime {
     /// Когда и с каким значением ось последний раз попала в монитор.
     monitor_axes: HashMap<Axis, (Instant, f32)>,
     /// Калибровка активного геймпада (id геймпада, поправка) — чтобы не искать на каждое движение.
-    cal_cache: Option<(u32, Option<Calibration>)>,
+    cal_cache: HashMap<u32, Option<Calibration>>,
+    guests: Vec<Guest>,
+    guest_profiles: HashMap<String, Profile>,
     touched: Option<Touched>,
     /// Какие направления осей сейчас отклонены за порог касания.
     axis_touch: Vec<(Axis, Direction)>,
@@ -549,7 +575,9 @@ impl Runtime {
             input_ms: None,
             raw_axes: HashMap::new(),
             monitor_axes: HashMap::new(),
-            cal_cache: None,
+            cal_cache: HashMap::new(),
+            guests: Vec::new(),
+            guest_profiles: HashMap::new(),
             touched: None,
             axis_touch: Vec::new(),
             dirty: true,
@@ -618,21 +646,39 @@ impl Runtime {
         self.dirty = true;
         match event {
             RawEvent::Added(_) => {
+                self.cal_cache.clear();
                 if self.active.is_none() {
                     self.active = self.pick_pad();
                 }
             }
             RawEvent::Removed(id) => {
+                self.cal_cache.remove(&id);
+                if let Some(i) = self.guests.iter().position(|g| g.pad == id) {
+                    let mut g = self.guests.remove(i);
+                    g.mapper.release_all();
+                    self.outputs.extend(g.mapper.drain());
+                    self.flush();
+                }
                 if self.active == Some(id) {
                     self.mapper.release_all();
                     self.flush();
                     self.active = self.pick_pad();
+                    // Новый основной геймпад больше не гость
+                    if let Some(next) = self.active {
+                        self.drop_guest(next);
+                    }
                 }
             }
             RawEvent::Input { pad, event, t_ns } => {
+                if self.settings.pad == PadChoice::All && self.active.is_some() && Some(pad) != self.active {
+                    let event = self.calibrate(pad, event);
+                    self.log_input(event);
+                    self.guest_input(pad, event);
+                    return;
+                }
                 if Some(pad) != self.active {
                     let pressed = matches!(event, InputEvent::Button { down: true, .. });
-                    if self.settings.pad != PadChoice::Auto || !pressed {
+                    if !matches!(self.settings.pad, PadChoice::Auto | PadChoice::All) || !pressed {
                         return;
                     }
                     self.mapper.release_all();
@@ -653,16 +699,98 @@ impl Runtime {
 
     fn calibrate(&mut self, pad: u32, event: InputEvent) -> InputEvent {
         let InputEvent::Axis { axis, value } = event else { return event };
-        self.raw_axes.insert(axis, value);
-        if self.cal_cache.as_ref().map(|c| c.0) != Some(pad) {
+        if Some(pad) == self.active {
+            self.raw_axes.insert(axis, value);
+        }
+        if !self.cal_cache.contains_key(&pad) {
             let name = self.input.as_ref().and_then(|i| i.pads().into_iter().find(|p| p.id == pad)).map(|p| p.name);
             let cal = name.and_then(|n| self.settings.calibration.get(&n).cloned());
-            self.cal_cache = Some((pad, cal));
+            self.cal_cache.insert(pad, cal);
         }
-        match &self.cal_cache {
-            Some((_, Some(cal))) => InputEvent::Axis { axis, value: cal.apply(axis, value) },
+        match self.cal_cache.get(&pad) {
+            Some(Some(cal)) => InputEvent::Axis { axis, value: cal.apply(axis, value) },
             _ => event,
         }
+    }
+
+    // ---------- несколько геймпадов ----------
+
+    fn pad_key(&self, pad: u32) -> Option<String> {
+        self.input.as_ref()?.pads().into_iter().find(|p| p.id == pad).map(|p| p.key)
+    }
+
+    /// Профиль для дополнительного геймпада: назначенный ему или копия основного.
+    fn guest_profile(&self, pad: u32) -> (Profile, bool) {
+        match self.pad_key(pad).and_then(|k| self.guest_profiles.get(&k).cloned()) {
+            Some(p) => (p, true),
+            None => (self.mapper.profile().clone(), false),
+        }
+    }
+
+    fn guest_input(&mut self, pad: u32, event: InputEvent) {
+        if !self.guests.iter().any(|g| g.pad == pad) {
+            let (profile, assigned) = self.guest_profile(pad);
+            self.guests.push(Guest { pad, mapper: Mapper::new(profile), assigned });
+            self.sync_sounds(false);
+        }
+        if let Some(g) = self.guests.iter_mut().find(|g| g.pad == pad) {
+            g.mapper.handle(event);
+            self.outputs.extend(g.mapper.drain());
+        }
+        self.flush();
+    }
+
+    fn drop_guest(&mut self, pad: u32) {
+        if let Some(i) = self.guests.iter().position(|g| g.pad == pad) {
+            let mut g = self.guests.remove(i);
+            g.mapper.release_all();
+            self.outputs.extend(g.mapper.drain());
+            self.flush();
+        }
+    }
+
+    fn drop_guests(&mut self) {
+        let pads: Vec<u32> = self.guests.iter().map(|g| g.pad).collect();
+        for pad in pads {
+            self.drop_guest(pad);
+        }
+        self.sync_sounds(false);
+    }
+
+    /// Пересоздать раскладки гостей (сменился основной профиль или назначения).
+    fn refresh_guests(&mut self) {
+        let pads: Vec<u32> = self.guests.iter().map(|g| g.pad).collect();
+        for pad in pads {
+            let (profile, assigned) = self.guest_profile(pad);
+            let Some(g) = self.guests.iter_mut().find(|g| g.pad == pad) else { continue };
+            if g.mapper.profile() == &profile {
+                continue;
+            }
+            if g.mapper.can_retune(&profile) {
+                g.mapper.retune(profile);
+            } else {
+                g.mapper.panic();
+                self.outputs.extend(g.mapper.drain());
+                g.mapper = Mapper::new(profile);
+            }
+            g.assigned = assigned;
+            self.outputs.extend(g.mapper.drain());
+        }
+        self.sync_sounds(false);
+        self.flush();
+    }
+
+    /// Партии, которые звучат сейчас: основного профиля и гостей (канал занимает тот, кто первый).
+    fn all_parts(&self) -> Vec<crate::model::Part> {
+        let mut parts = self.mapper.profile().parts.clone();
+        for g in &self.guests {
+            for p in &g.mapper.profile().parts {
+                if !parts.iter().any(|x| x.channel == p.channel) {
+                    parts.push(p.clone());
+                }
+            }
+        }
+        parts
     }
 
     fn log_input(&mut self, event: InputEvent) {
@@ -719,7 +847,7 @@ impl Runtime {
     fn pick_pad(&self) -> Option<u32> {
         let pads = self.input.as_ref()?.pads();
         match &self.settings.pad {
-            PadChoice::Auto => pads.first().map(|p| p.id),
+            PadChoice::Auto | PadChoice::All => pads.first().map(|p| p.id),
             PadChoice::Fixed { name } => pads.iter().find(|p| &p.name == name).map(|p| p.id),
         }
     }
@@ -734,12 +862,19 @@ impl Runtime {
                     Some(c) => self.settings.calibration.insert(pad, c),
                     None => self.settings.calibration.remove(&pad),
                 };
-                self.cal_cache = None;
+                self.cal_cache.clear();
+            }
+            Command::SetGuestProfiles(map) => {
+                self.guest_profiles = map;
+                self.refresh_guests();
             }
             Command::SetPadChoice(choice) => {
                 self.settings.pad = choice;
+                if self.settings.pad != PadChoice::All {
+                    self.drop_guests();
+                }
                 let next = match &self.settings.pad {
-                    PadChoice::Auto => self.active.or_else(|| self.pick_pad()),
+                    PadChoice::Auto | PadChoice::All => self.active.or_else(|| self.pick_pad()),
                     PadChoice::Fixed { .. } => self.pick_pad(),
                 };
                 if next != self.active {
@@ -785,6 +920,7 @@ impl Runtime {
                 self.sync_sounds(false);
                 self.sync_ports();
                 self.flush();
+                self.refresh_guests();
             }
             Command::SetClockIn(port) => {
                 self.clock_in = None;
@@ -821,6 +957,10 @@ impl Runtime {
             }
             Command::Panic => {
                 self.drop_live_pending();
+                for g in &mut self.guests {
+                    g.mapper.panic();
+                    self.outputs.extend(g.mapper.drain());
+                }
                 self.mapper.panic();
                 self.flush();
             }
@@ -954,6 +1094,15 @@ impl Runtime {
         self.last_tick = now;
         if self.mapper.needs_tick() {
             self.mapper.tick(dt);
+            self.flush();
+        }
+        for g in &mut self.guests {
+            if g.mapper.needs_tick() {
+                g.mapper.tick(dt);
+                self.outputs.extend(g.mapper.drain());
+            }
+        }
+        if !self.outputs.is_empty() {
             self.flush();
         }
     }
@@ -1126,7 +1275,12 @@ impl Runtime {
     }
 
     fn restore_synth_state(&mut self) {
-        let msgs = self.mapper.state_messages();
+        let mut msgs = Vec::new();
+        // Гости раньше: при общем канале прав основной профиль
+        for g in &self.guests {
+            msgs.extend(g.mapper.state_messages());
+        }
+        msgs.extend(self.mapper.state_messages());
         if let Some(synth) = &mut self.synth {
             msgs.into_iter().for_each(|m| synth.send(m));
         }
@@ -1202,7 +1356,7 @@ impl Runtime {
     /// Стойка под текущие партии: свои банки и сэмплы. Ошибки — в `part_errors`, такая партия
     /// играет основным банком.
     fn rack_config(&mut self, rate: u32) -> RackConfig {
-        let parts = self.mapper.profile().parts.clone();
+        let parts = self.all_parts();
         let mut routes = [Route::Main; 16];
         let mut extra = Vec::new();
         let mut font_index: Vec<PathBuf> = Vec::new();
@@ -1256,7 +1410,7 @@ impl Runtime {
 
     /// Применить источники звука партий к стойке (если они поменялись или `force`).
     fn sync_sounds(&mut self, force: bool) {
-        let sig: Vec<(u8, PartSource)> = self.mapper.profile().parts.iter().map(|p| (p.channel, p.source.clone())).collect();
+        let sig: Vec<(u8, PartSource)> = self.all_parts().iter().map(|p| (p.channel, p.source.clone())).collect();
         if !force && self.applied_sources.as_ref() == Some(&sig) {
             return;
         }
@@ -1361,7 +1515,7 @@ impl Runtime {
         consider(self.scheduled.iter().map(|(t, _, _)| *t).min());
         consider(self.looper.next_deadline(LOOP_LOOKAHEAD));
         consider(self.throttle.values().filter(|t| t.pending.is_some()).map(|t| t.last + CONTROL_INTERVAL).min());
-        if self.mapper.needs_tick() {
+        if self.mapper.needs_tick() || self.guests.iter().any(|g| g.mapper.needs_tick()) {
             consider(Some(now + TICK_INTERVAL));
         }
         if ts.send_clock && self.clock.running() {
@@ -1639,11 +1793,22 @@ impl Runtime {
             music: Some(profile.music.clone()),
             controls: self.mapper.preview(),
             axes: self.mapper.axis_values(),
+            guests: self
+                .guests
+                .iter()
+                .map(|g| GuestStatus { pad: g.pad, profile: g.mapper.profile().name.clone(), notes: g.mapper.sounding_notes() })
+                .collect(),
             raw_axes: self.raw_axes.clone(),
             layers: self.mapper.active_layers().iter().map(|l| l.name.clone()).collect(),
             transpose: self.mapper.transpose(),
             degree_shift: self.mapper.offset().1,
-            notes: self.mapper.sounding_notes(),
+            notes: {
+                let mut notes = self.mapper.sounding_notes();
+                notes.extend(self.guests.iter().flat_map(|g| g.mapper.sounding_notes()));
+                notes.sort_unstable();
+                notes.dedup();
+                notes
+            },
             pressed: self.mapper.pressed(),
             parts,
             synth: SynthStatus {

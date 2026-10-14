@@ -32,7 +32,10 @@
   ];
 
   const activePad = $derived(status.pads.find((p) => p.id === status.active_pad) ?? null);
-  const padValue = $derived(status.pad_choice.mode === "auto" ? "__auto" : status.pad_choice.name);
+  const padValue = $derived(
+    status.pad_choice.mode === "auto" ? "__auto" : status.pad_choice.mode === "all" ? "__all" : status.pad_choice.name,
+  );
+  const guests = $derived(status.guests?.length ?? 0);
 
   function time(sec: number): string {
     return `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, "0")}`;
@@ -72,7 +75,9 @@
       <span class="led" class:on={!!activePad}></span>
       <div class="stack" style="--gap: 0">
         <span class="ellipsis">{activePad?.name ?? "не подключён"}</span>
-        {#if activePad}<span class="xs muted">{familyName[activePad.family]}</span>{/if}
+        {#if activePad}
+          <span class="xs muted">{familyName[activePad.family]}{guests ? ` · ещё ${guests} играют` : ""}</span>
+        {/if}
       </div>
     </div>
     {#if status.pads.length > 1}
@@ -82,10 +87,17 @@
         value={padValue}
         onchange={(e) =>
           run(() =>
-            api.setPadChoice(e.currentTarget.value === "__auto" ? { mode: "auto" } : { mode: "fixed", name: e.currentTarget.value }),
+            api.setPadChoice(
+              e.currentTarget.value === "__auto"
+                ? { mode: "auto" }
+                : e.currentTarget.value === "__all"
+                  ? { mode: "all" }
+                  : { mode: "fixed", name: e.currentTarget.value },
+            ),
           )}
       >
         <option value="__auto">Тот, где нажали</option>
+        <option value="__all">Все сразу</option>
         {#each status.pads as p (p.id)}<option value={p.name}>{p.name}</option>{/each}
       </select>
     {/if}

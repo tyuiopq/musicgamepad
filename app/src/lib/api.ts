@@ -21,11 +21,20 @@ export type PadFamily = "xbox" | "play_station" | "nintendo" | "generic";
 export interface PadInfo {
   id: number;
   name: string;
+  /** Имя для назначений: у второго такого же геймпада — «… #2». */
+  key?: string;
   family: PadFamily;
   model: string;
 }
 
-export type PadChoice = { mode: "auto" } | { mode: "fixed"; name: string };
+export type PadChoice = { mode: "auto" } | { mode: "fixed"; name: string } | { mode: "all" };
+
+/** Дополнительный геймпад в режиме «все сразу». */
+export interface GuestStatus {
+  pad: number;
+  profile: string;
+  notes: number[];
+}
 
 export type Direction = "positive" | "negative";
 
@@ -303,6 +312,8 @@ export interface MidiStatus {
 
 export interface AppSettings {
   clock_in?: string | null;
+  /** Профили дополнительных геймпадов: ключ геймпада → профиль. */
+  pad_assign?: Record<string, string>;
   pad_profiles: Record<string, string>;
   calibration?: Record<string, Calibration>;
   ui?: { accent: string | null; secondary: string | null };
@@ -332,6 +343,7 @@ export interface Status {
   layers: string[];
   controls: ControlView[];
   axes: Partial<Record<string, number>>;
+  guests?: GuestStatus[];
   /** Оси до калибровки. */
   raw_axes?: Partial<Record<string, number>>;
   transpose: number;
@@ -397,6 +409,7 @@ export const api = {
   setCalibration: (pad: string, calibration: Calibration | null) => invoke<void>("set_calibration", { pad, calibration }),
   setPadProfile: (family: string, profile: string | null) => invoke<void>("set_pad_profile", { family, profile }),
   setUiColors: (accent: string, secondary: string) => invoke<void>("set_ui_colors", { accent, secondary }),
+  setPadAssign: (pad: string, profile: string | null) => invoke<void>("set_pad_assign", { pad, profile }),
   setPadChoice: (choice: PadChoice) => invoke<void>("set_pad_choice", { choice }),
   setSynthEnabled: (enabled: boolean) => invoke<void>("set_synth_enabled", { enabled }),
   setAudioMode: (mode: AudioMode) => invoke<void>("set_audio_mode", { mode }),

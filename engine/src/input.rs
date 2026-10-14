@@ -27,6 +27,8 @@ pub enum PadFamily {
 pub struct PadInfo {
     pub id: u32,
     pub name: String,
+    /// Имя, по которому геймпад узнаётся между запусками: у второго такого же — «… #2».
+    pub key: String,
     pub family: PadFamily,
     /// Точная модель по версии SDL (XboxOne, PS5, …).
     pub model: String,
@@ -60,6 +62,10 @@ impl GamepadInput {
     pub fn pads(&self) -> Vec<PadInfo> {
         let mut v: Vec<PadInfo> = self.pads.values().map(|(_, info)| info.clone()).collect();
         v.sort_by_key(|p| p.id);
+        for i in 0..v.len() {
+            let n = v[..i].iter().filter(|p| p.name == v[i].name).count();
+            v[i].key = if n == 0 { v[i].name.clone() } else { format!("{} #{}", v[i].name, n + 1) };
+        }
         v
     }
 
@@ -122,9 +128,11 @@ fn pad_info(id: JoystickId, pad: &Gamepad) -> PadInfo {
         | GamepadType::NintendoSwitchJoyconPair => PadFamily::Nintendo,
         _ => PadFamily::Generic,
     };
+    let name = pad.name().unwrap_or_else(|| "Геймпад".into());
     PadInfo {
         id: id.raw(),
-        name: pad.name().unwrap_or_else(|| "Геймпад".into()),
+        key: name.clone(),
+        name,
         family,
         model: format!("{kind:?}"),
     }

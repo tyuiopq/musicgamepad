@@ -43,6 +43,16 @@ impl AppState {
         }
     }
 
+    /// Отправить движку профили дополнительных геймпадов (после смены назначений или самих профилей).
+    fn push_guests(&self) {
+        let assign = self.settings.lock().unwrap().pad_assign.clone();
+        let map = assign
+            .into_iter()
+            .filter_map(|(pad, name)| self.profiles.find(&name).map(|p| (pad, self.with_instruments(p))))
+            .collect();
+        self.engine.send(Command::SetGuestProfiles(map));
+    }
+
     /// Подставить инструменты, выбранные кнопкой в прошлый раз.
     fn with_instruments(&self, mut profile: Profile) -> Profile {
         let settings = self.settings.lock().unwrap();
@@ -318,6 +328,7 @@ fn save_profile(state: State<AppState>, profile: Profile, previous: Option<Strin
         s.instruments.remove(&profile.name);
     });
     state.activate(profile);
+    state.push_guests();
     Ok(())
 }
 
@@ -356,6 +367,20 @@ async fn import_profile(app: AppHandle) -> CmdResult<Option<String>> {
     let name = profile.name.clone();
     state.activate(profile);
     Ok(Some(name))
+}
+
+/// Каким профилем играет дополнительный геймпад в режиме «все сразу» (None — как основной).
+#[tauri::command]
+fn set_pad_assign(state: State<AppState>, pad: String, profile: Option<String>) {
+    state.update_settings(|s| match profile {
+        Some(name) => {
+            s.pad_assign.insert(pad, name);
+        }
+        None => {
+            s.pad_assign.remove(&pad);
+        }
+    });
+    state.push_guests();
 }
 
 /// Калибровка осей геймпада с этим именем (None — сбросить).
@@ -421,6 +446,7 @@ fn auto_profile(app: &AppHandle, family: &str) {
 #[tauri::command]
 fn delete_profile(state: State<AppState>, name: String) -> CmdResult<String> {
     state.profiles.delete(&name)?;
+    state.push_guests();
     let current = state.profile.lock().unwrap().name.clone();
     if current == name {
         let next = state.profiles.find(&name).unwrap_or_else(presets::classic);
@@ -651,6 +677,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         settings_path,
         recordings,
     });
+    app.state::<AppState>().push_guests();
     Ok(())
 }
 
@@ -686,6 +713,7 @@ pub fn run() {
             import_profile,
             set_pad_profile,
             set_calibration,
+            set_pad_assign,
             set_ui_colors,
             list_sound_library,
             get_presets_for,

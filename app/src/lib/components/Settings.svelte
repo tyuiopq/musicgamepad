@@ -25,11 +25,13 @@
   let inPorts = $state<string[]>([]);
   let padProfiles = $state<Record<string, string>>({});
   let calibration = $state<Record<string, Calibration>>({});
+  let padAssign = $state<Record<string, string>>({});
 
   async function refreshSettings() {
     const s = await api.settings();
     padProfiles = s.pad_profiles ?? {};
     calibration = s.calibration ?? {};
+    padAssign = s.pad_assign ?? {};
   }
 
   async function refreshPorts() {
@@ -72,6 +74,10 @@
           <input type="radio" name="pad" checked={status.pad_choice.mode === "auto"} onchange={() => run(() => api.setPadChoice({ mode: "auto" }))} />
           <span>Играет тот, на котором нажали</span>
         </label>
+        <label class="radio">
+          <input type="radio" name="pad" checked={status.pad_choice.mode === "all"} onchange={() => run(() => api.setPadChoice({ mode: "all" }))} />
+          <span>Все сразу — каждый своим профилем</span>
+        </label>
         {#each status.pads as pad (pad.id)}
           <label class="radio">
             <input
@@ -88,6 +94,36 @@
         {/each}
       </div>
       {#if status.input_error}<p class="error">{status.input_error}</p>{/if}
+      {#if status.pad_choice.mode === "all" && status.pads.length > 1}
+        <div class="sep"></div>
+        <h3 class="card-title">Кто чем играет</h3>
+        <p class="hint">Основной геймпад играет профилем на экране. Остальным можно дать свой — например, второму барабаны.</p>
+        {#each status.pads as pad (pad.id)}
+          {@const key = pad.key ?? pad.name}
+          <label class="field" style="--label-w: 180px">
+            <span class="label ellipsis" title={key}>{key}</span>
+            {#if pad.id === status.active_pad}
+              <span class="xs muted">основной · {status.profile}</span>
+            {:else}
+              <select
+                class="select select-sm"
+                value={padAssign[key] ?? ""}
+                onchange={(e) =>
+                  run(async () => {
+                    await api.setPadAssign(key, e.currentTarget.value || null);
+                    await refreshSettings();
+                  })}
+              >
+                <option value="">как основной</option>
+                {#each profiles as p (p.name)}<option value={p.name}>{p.name}</option>{/each}
+              </select>
+            {/if}
+          </label>
+        {/each}
+        {#if status.guests?.some((g) => g.profile !== status.profile)}
+          <p class="hint">Если профили используют одни и те же MIDI-каналы, звучит инструмент основного — разведи партии по каналам.</p>
+        {/if}
+      {/if}
       <div class="sep"></div>
       <h3 class="card-title">Калибровка</h3>
       <p class="hint">Если стик в покое «плывёт» или курок не добирает до максимума.</p>
