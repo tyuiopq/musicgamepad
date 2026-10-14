@@ -18,6 +18,10 @@ use tauri_plugin_opener::OpenerExt;
 
 struct AppState {
     engine: Engine,
+    /// Папка библиотеки звуков: свои .sf2 и сэмплы (папка samples).
+    library: PathBuf,
+    /// Инструменты своих банков, уже прочитанные (банк читается ~0,2 с).
+    bank_presets: Mutex<std::collections::HashMap<PathBuf, Vec<PresetInfo>>>,
     settings: Mutex<Settings>,
     /// Профиль, который сейчас играет (может быть несохранённым черновиком редактора).
     profile: Mutex<Profile>,
@@ -56,6 +60,111 @@ fn get_status(state: State<AppState>) -> Status {
 #[tauri::command]
 fn get_presets(state: State<AppState>) -> Vec<PresetInfo> {
     state.engine.presets()
+}
+
+#[derive(Serialize)]
+struct BankEntry {
+    /// Путь для профиля: относительно папки библиотеки.
+    file: String,
+    name: String,
+}
+
+/// Свои банки .sf2 из папки библиотеки звуков.
+#[tauri::command]
+fn list_sound_library(state: State<AppState>) -> Vec<BankEntry> {
+    let Ok(dir) = std::fs::read_dir(&state.library) else { return Vec::new() };
+    let mut v: Vec<BankEntry> = dir
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("sf2")))
+        .filter_map(|p| {
+            let file = p.file_name()?.to_string_lossy().to_string();
+            let name = p.file_stem()?.to_string_lossy().to_string();
+            Some(BankEntry { file, name })
+        })
+        .collect();
+    v.sort_by_key(|b| b.name.to_lowercase());
+    v
+}
+
+fn library_path(state: &AppState, file: &str) -> PathBuf {
+    let p = PathBuf::from(file);
+    if p.is_absolute() { p } else { state.library.join(p) }
+}
+
+/// Инструменты банка партии (None — основной банк программы).
+#[tauri::command]
+fn get_presets_for(state: State<AppState>, file: Option<String>) -> CmdResult<Vec<PresetInfo>> {
+    let Some(file) = file else { return Ok(state.engine.presets()) };
+    let path = library_path(&state, &file);
+    if let Some(v) = state.bank_presets.lock().unwrap().get(&path) {
+        return Ok(v.clone());
+    }
+    let bank = engine::audio::SoundBank::load(&path).map_err(|e| e.to_string())?;
+    state.bank_presets.lock().unwrap().insert(path, bank.presets.clone());
+    Ok(bank.presets)
+}
+
+/// Скопировать файл в библиотеку (в подпапку `sub`), не затирая другой с тем же именем.
+fn copy_into_library(state: &AppState, src: &std::path::Path, sub: &str) -> CmdResult<String> {
+    let dir = state.library.join(sub);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let name = src.file_name().ok_or("у файла нет имени")?.to_string_lossy().to_string();
+    if src.parent().and_then(|p| p.canonicalize().ok()) == dir.canonicalize().ok() {
+        return Ok(if sub.is_empty() { name } else { format!("{sub}/{name}") });
+    }
+    let stem = src.file_stem().unwrap_or_default().to_string_lossy().to_string();
+    let ext = src.extension().unwrap_or_default().to_string_lossy().to_string();
+    let mut target = dir.join(&name);
+    let mut i = 2;
+    while target.exists() {
+        target = dir.join(format!("{stem} ({i}).{ext}"));
+        i += 1;
+    }
+    std::fs::copy(src, &target).map_err(|e| e.to_string())?;
+    let file = target.file_name().unwrap().to_string_lossy().to_string();
+    Ok(if sub.is_empty() { file } else { format!("{sub}/{file}") })
+}
+
+/// Добавить свой банк .sf2 в библиотеку. Возвращает путь для профиля.
+#[tauri::command]
+async fn add_soundfont(app: AppHandle) -> CmdResult<Option<String>> {
+    let Some(file) = app.dialog().file().add_filter("Звуковой банк SoundFont", &["sf2"]).blocking_pick_file() else {
+        return Ok(None);
+    };
+    let path = file.into_path().map_err(|e| e.to_string())?;
+    copy_into_library(&app.state::<AppState>(), &path, "").map(Some)
+}
+
+/// Выбрать WAV для пэда сэмплера (копируется в библиотеку).
+#[tauri::command]
+async fn choose_sample(app: AppHandle) -> CmdResult<Option<String>> {
+    let Some(file) = app.dialog().file().add_filter("Звук WAV", &["wav"]).blocking_pick_file() else {
+        return Ok(None);
+    };
+    let path = file.into_path().map_err(|e| e.to_string())?;
+    copy_into_library(&app.state::<AppState>(), &path, "samples").map(Some)
+}
+
+/// Все WAV из папки — в библиотеку, по алфавиту. Для кита «из папки».
+#[tauri::command]
+async fn kit_from_folder(app: AppHandle) -> CmdResult<Vec<String>> {
+    let Some(folder) = app.dialog().file().blocking_pick_folder() else { return Ok(Vec::new()) };
+    let folder = folder.into_path().map_err(|e| e.to_string())?;
+    let mut files: Vec<PathBuf> = std::fs::read_dir(&folder)
+        .map_err(|e| e.to_string())?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("wav")))
+        .collect();
+    files.sort();
+    let state = app.state::<AppState>();
+    let kit = folder.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "kit".into());
+    files.iter().take(32).map(|f| copy_into_library(&state, f, &format!("samples/{kit}"))).collect()
+}
+
+#[tauri::command]
+fn open_sound_library(app: AppHandle, state: State<AppState>) -> CmdResult<()> {
+    std::fs::create_dir_all(&state.library).map_err(|e| e.to_string())?;
+    app.opener().open_path(state.library.to_string_lossy(), None::<&str>).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -409,6 +518,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             settings: settings.clone(),
             soundfont_dirs: vec![data_dir.join("sounds")],
             recordings_dir: recordings.clone(),
+            library_dir: data_dir.join("sounds"),
         },
         {
             let mut last_family: Option<String> = None;
@@ -431,6 +541,8 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     );
     app.manage(AppState {
         engine,
+        library: data_dir.join("sounds"),
+        bank_presets: Mutex::new(Default::default()),
         settings: Mutex::new(settings),
         profile: Mutex::new(profile),
         profiles,
@@ -469,6 +581,12 @@ pub fn run() {
             export_profile,
             import_profile,
             set_pad_profile,
+            list_sound_library,
+            get_presets_for,
+            add_soundfont,
+            choose_sample,
+            kit_from_folder,
+            open_sound_library,
             toggle_record,
             midi_monitor,
             send_test,

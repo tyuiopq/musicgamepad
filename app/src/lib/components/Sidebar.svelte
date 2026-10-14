@@ -202,6 +202,7 @@
       {#if status.synth.custom_soundfont}
         <button type="button" class="link small" onclick={() => run(api.resetSoundfont)}>По умолчанию</button>
       {/if}
+      <button type="button" class="link small" onclick={() => run(api.openSoundLibrary)} title="Свои .sf2 и сэмплы">Папка библиотеки</button>
     </div>
   </section>
 

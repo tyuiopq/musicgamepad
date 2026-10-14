@@ -13,15 +13,15 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use rtrb::{Consumer, Producer, RingBuffer};
-use rustysynth::{SoundFont, Synthesizer, SynthesizerSettings};
+use rustysynth::SoundFont;
+
+use crate::rack::{Rack, RackConfig};
 use serde::{Deserialize, Serialize};
 
 use crate::midi::MidiMsg;
 
 /// Желаемый размер буфера в общем режиме, кадров. Драйвер может дать больше.
 const PREFERRED_BUFFER: u32 = 256;
-/// Внутренний блок синтеза: чем меньше, тем точнее время нот внутри буфера.
-const SYNTH_BLOCK: usize = 64;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -118,10 +118,16 @@ impl Click {
     }
 }
 
-/// Синтезатор внутри аудиопотока: забирает MIDI из очереди и считает звук.
+/// Очереди в аудиопоток: MIDI и новые конфигурации стойки (без ожиданий и блокировок).
+pub(crate) struct CoreInputs {
+    pub midi: Consumer<MidiMsg>,
+    pub config: Consumer<Box<RackConfig>>,
+}
+
+/// Стойка инструментов внутри аудиопотока: забирает MIDI из очереди и считает звук.
 pub(crate) struct SynthCore {
-    synth: Synthesizer,
-    rx: Consumer<MidiMsg>,
+    rack: Rack,
+    inputs: CoreInputs,
     shared: Arc<AudioShared>,
     sample_rate: u32,
     clicks: Vec<Click>,
@@ -133,30 +139,32 @@ impl SynthCore {
     pub(crate) fn new(
         font: &Arc<SoundFont>,
         sample_rate: u32,
-        rx: Consumer<MidiMsg>,
+        inputs: CoreInputs,
         shared: Arc<AudioShared>,
     ) -> anyhow::Result<Self> {
-        let mut settings = SynthesizerSettings::new(sample_rate as i32);
-        settings.block_size = SYNTH_BLOCK;
-        let synth = Synthesizer::new(font, &settings).map_err(|e| anyhow!("синтезатор: {e:?}"))?;
-        Ok(Self { synth, rx, shared, sample_rate, clicks: Vec::with_capacity(4), left: vec![0.0; 4096], right: vec![0.0; 4096] })
+        let rack = Rack::new(crate::rack::new_synth(font, sample_rate)?, sample_rate);
+        Ok(Self { rack, inputs, shared, sample_rate, clicks: Vec::with_capacity(4), left: vec![0.0; 4096], right: vec![0.0; 4096] })
     }
 
     /// Применить пришедший MIDI и посчитать `frames` кадров.
     pub(crate) fn render(&mut self, frames: usize) -> (&[f32], &[f32]) {
-        while let Ok(m) = self.rx.pop() {
-            let [status, d1, d2] = m.bytes;
+        // Сначала новая конфигурация стойки, потом MIDI: движок шлёт их в этом порядке
+        while let Ok(cfg) = self.inputs.config.pop() {
+            self.rack.apply(*cfg);
+        }
+        while let Ok(m) = self.inputs.midi.pop() {
+            let [status, d1, _] = m.bytes;
             if status == crate::transport::CLICK_STATUS {
-                self.clicks.push(Click::new(d1, d2 != 0, self.sample_rate));
+                self.clicks.push(Click::new(d1, m.bytes[2] != 0, self.sample_rate));
                 continue;
             }
-            self.synth.process_midi_message((status & 0x0F) as i32, (status & 0xF0) as i32, d1 as i32, d2 as i32);
+            self.rack.process(m);
         }
         if self.left.len() < frames {
             self.left.resize(frames, 0.0);
             self.right.resize(frames, 0.0);
         }
-        self.synth.render(&mut self.left[..frames], &mut self.right[..frames]);
+        self.rack.render(&mut self.left[..frames], &mut self.right[..frames]);
         let gain = self.shared.gain();
         if gain != 1.0 {
             self.left[..frames].iter_mut().for_each(|s| *s *= gain);
@@ -214,6 +222,7 @@ enum Backend {
 pub struct Synth {
     _backend: Backend,
     tx: Producer<MidiMsg>,
+    cfg_tx: Producer<Box<RackConfig>>,
     shared: Arc<AudioShared>,
     pub mode: AudioMode,
     pub device: String,
@@ -243,12 +252,15 @@ impl Synth {
 
     #[cfg(windows)]
     fn start_exclusive(bank: &SoundBank, gain: f32) -> anyhow::Result<Self> {
-        let (tx, rx) = RingBuffer::<MidiMsg>::new(4096);
+        let (tx, midi) = RingBuffer::<MidiMsg>::new(4096);
+        let (cfg_tx, config) = RingBuffer::<Box<RackConfig>>::new(8);
         let shared = Arc::new(AudioShared::new(gain));
-        let (out, info) = crate::audio_exclusive::ExclusiveOutput::start(bank.font.clone(), rx, shared.clone())?;
+        let (out, info) =
+            crate::audio_exclusive::ExclusiveOutput::start(bank.font.clone(), CoreInputs { midi, config }, shared.clone())?;
         Ok(Self {
             _backend: Backend::Exclusive(out),
             tx,
+            cfg_tx,
             shared,
             mode: AudioMode::Exclusive,
             device: info.device,
@@ -282,9 +294,10 @@ impl Synth {
         let channels = config.channels as usize;
         let sample_rate = config.sample_rate;
 
-        let (tx, rx) = RingBuffer::<MidiMsg>::new(4096);
+        let (tx, midi) = RingBuffer::<MidiMsg>::new(4096);
+        let (cfg_tx, cfg_rx) = RingBuffer::<Box<RackConfig>>::new(8);
         let shared = Arc::new(AudioShared::new(gain));
-        let mut core = SynthCore::new(&bank.font, sample_rate, rx, shared.clone())?;
+        let mut core = SynthCore::new(&bank.font, sample_rate, CoreInputs { midi, config: cfg_rx }, shared.clone())?;
         let cb_shared = shared.clone();
         let err_shared = shared.clone();
 
@@ -312,6 +325,7 @@ impl Synth {
         Ok(Self {
             _backend: Backend::Shared(stream),
             tx,
+            cfg_tx,
             shared,
             mode: AudioMode::Shared,
             device: device_name,
@@ -323,6 +337,11 @@ impl Synth {
 
     pub fn send(&mut self, msg: MidiMsg) {
         let _ = self.tx.push(msg);
+    }
+
+    /// Новая конфигурация стойки (банки и сэмплы партий).
+    pub fn configure(&mut self, cfg: RackConfig) {
+        let _ = self.cfg_tx.push(Box::new(cfg));
     }
 
     /// Общая громкость: 1 — как есть.

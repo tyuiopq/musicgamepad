@@ -7,7 +7,6 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 
 use anyhow::anyhow;
-use rtrb::Consumer;
 use rustysynth::SoundFont;
 use wasapi::{
     calculate_period_100ns, initialize_mta, AudioClient, AudioRenderClient, DeviceEnumerator, Direction, Handle,
@@ -17,8 +16,7 @@ use windows::Win32::Media::Audio::{
     AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED, AUDCLNT_E_DEVICE_IN_USE, AUDCLNT_E_EXCLUSIVE_MODE_NOT_ALLOWED,
 };
 
-use crate::audio::{AudioShared, SynthCore};
-use crate::midi::MidiMsg;
+use crate::audio::{AudioShared, CoreInputs, SynthCore};
 
 /// Сколько ждать события от устройства, прежде чем счесть его пропавшим.
 const EVENT_TIMEOUT_MS: u32 = 500;
@@ -47,7 +45,7 @@ impl ExclusiveOutput {
     /// Открывает устройство в отдельном потоке и ждёт, получилось ли.
     pub(crate) fn start(
         font: Arc<SoundFont>,
-        rx: Consumer<MidiMsg>,
+        inputs: CoreInputs,
         shared: Arc<AudioShared>,
     ) -> anyhow::Result<(Self, Info)> {
         let stop = Arc::new(AtomicBool::new(false));
@@ -55,7 +53,7 @@ impl ExclusiveOutput {
         let thread_stop = stop.clone();
         let thread = std::thread::Builder::new()
             .name("audio".into())
-            .spawn(move || run(font, rx, shared, thread_stop, init_tx))?;
+            .spawn(move || run(font, inputs, shared, thread_stop, init_tx))?;
         match init_rx.recv() {
             Ok(Ok(info)) => Ok((Self { stop, thread: Some(thread) }, info)),
             Ok(Err(e)) => {
@@ -86,7 +84,7 @@ struct Stream {
 
 fn run(
     font: Arc<SoundFont>,
-    rx: Consumer<MidiMsg>,
+    inputs: CoreInputs,
     shared: Arc<AudioShared>,
     stop: Arc<AtomicBool>,
     init_tx: mpsc::SyncSender<anyhow::Result<Info>>,
@@ -98,7 +96,7 @@ fn run(
             return;
         }
     };
-    let mut core = match SynthCore::new(&font, info.sample_rate, rx, shared.clone()) {
+    let mut core = match SynthCore::new(&font, info.sample_rate, inputs, shared.clone()) {
         Ok(c) => c,
         Err(e) => {
             let _ = init_tx.send(Err(e));

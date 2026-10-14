@@ -13,6 +13,7 @@ fn main() {
             settings: Settings { synth_enabled: false, ..Default::default() },
             soundfont_dirs: Vec::new(),
             recordings_dir: std::env::temp_dir(),
+            library_dir: std::env::temp_dir(),
         },
         |_| {},
     );

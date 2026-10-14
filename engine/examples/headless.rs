@@ -12,6 +12,7 @@ fn main() {
             settings: Settings::default(),
             soundfont_dirs: Vec::new(),
             recordings_dir: std::env::temp_dir().join("musicgamepad"),
+            library_dir: std::env::temp_dir(),
         },
         |status| {
             let notes: Vec<String> = status.notes.iter().map(|&n| engine::theory::note_name(n)).collect();

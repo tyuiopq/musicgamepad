@@ -24,7 +24,7 @@ function baseStatus(): Status {
     degree_shift: 0,
     notes: scene.notes,
     pressed: scene.pressed as Status["pressed"],
-    parts: [{ name: "Мелодия", channel: 0, program: 0, instrument: "Grand Piano" }],
+    parts: [{ name: "Мелодия", channel: 0, program: 0, instrument: "Grand Piano", error: null }],
     synth: {
       enabled: true,
       soundfont: "C:\\assets\\GeneralUser-GS.sf2",
@@ -90,7 +90,20 @@ if (typeof window !== "undefined" && new URLSearchParams(location.search).has("p
 }
 
 const useAbleton = typeof location !== "undefined" && new URLSearchParams(location.search).get("profile") === "ableton";
-const profile = (useAbleton ? scene.ableton : scene.profile) as Profile;
+const profile = structuredClone((useAbleton ? scene.ableton : scene.profile) as Profile);
+// ?samples — у партии свой кит из сэмплов (посмотреть редактор пэдов)
+if (typeof location !== "undefined" && new URLSearchParams(location.search).has("samples")) {
+  profile.parts[0].channel = 9;
+  profile.parts[0].source = {
+    type: "samples",
+    pads: [
+      { note: 36, file: "samples/my-kit/kick_deep.wav", gain_db: 0, pitch: 0, choke: 0 },
+      { note: 38, file: "samples/my-kit/snare_tight.wav", gain_db: -3, pitch: 0, choke: 0 },
+      { note: 42, file: "samples/my-kit/hat_closed.wav", gain_db: -6, pitch: 0, choke: 1 },
+      { note: 46, file: "samples/my-kit/hat_open.wav", gain_db: -6, pitch: 0, choke: 1 },
+    ],
+  };
+}
 
 export const demo: Record<string, (args?: Record<string, unknown>) => unknown> = {
   get_status: () => structuredClone(status),
@@ -101,6 +114,8 @@ export const demo: Record<string, (args?: Record<string, unknown>) => unknown> =
   preview_profile: (args) => (args?.layer === "chords" ? scene.chords : scene.controls),
   apply_profile: () => undefined,
   get_presets: () => scene.presets,
+  get_presets_for: () => scene.presets,
+  list_sound_library: () => [{ file: "Arachno.sf2", name: "Arachno" }],
   midi_monitor: (args) => demoMonitor(Number(args?.since ?? 0)),
   list_recordings: () => [
     { name: "melody_2026-10-14_18-20-03", mid: "a.mid", wav: "a.wav", modified: "2026-10-14 18:20", bytes: 812345 },

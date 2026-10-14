@@ -195,6 +195,24 @@ export interface Sound {
   resonance: number;
 }
 
+export interface SamplePad {
+  note: number;
+  file: string;
+  gain_db: number;
+  pitch: number;
+  choke: number;
+}
+
+export type PartSource =
+  | { type: "default" }
+  | { type: "sound_font"; file: string }
+  | { type: "samples"; pads: SamplePad[] };
+
+export interface BankEntry {
+  file: string;
+  name: string;
+}
+
 export interface Part {
   name: string;
   channel: number;
@@ -205,6 +223,8 @@ export interface Part {
   instruments: number[];
   transpose: number;
   sound: Sound;
+  /** Нет поля — основной банк. */
+  source?: PartSource;
 }
 
 export interface PresetInfo {
@@ -247,6 +267,7 @@ export interface PartStatus {
   channel: number;
   program: number;
   instrument: string;
+  error: string | null;
 }
 
 export interface Status {
@@ -325,6 +346,12 @@ export const api = {
   chooseSoundfont: () => invoke<string | null>("choose_soundfont"),
   resetSoundfont: () => invoke<void>("reset_soundfont"),
   presets: () => invoke<PresetInfo[]>("get_presets"),
+  presetsFor: (file: string | null) => invoke<PresetInfo[]>("get_presets_for", { file }),
+  soundLibrary: () => invoke<BankEntry[]>("list_sound_library"),
+  addSoundfont: () => invoke<string | null>("add_soundfont"),
+  chooseSample: () => invoke<string | null>("choose_sample"),
+  kitFromFolder: () => invoke<string[]>("kit_from_folder"),
+  openSoundLibrary: () => invoke<void>("open_sound_library"),
   audition: (part: number) => invoke<void>("audition", { part }),
   setMidiOut: (port: string | null) => invoke<void>("set_midi_out", { port }),
   toggleRecord: () => invoke<void>("toggle_record"),

@@ -10,6 +10,7 @@ pub mod midi;
 pub mod midi_out;
 pub mod model;
 pub mod presets;
+pub mod rack;
 pub mod theory;
 pub mod transport;
 pub mod wav;

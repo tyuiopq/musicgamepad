@@ -1,7 +1,10 @@
 <script lang="ts">
   // Вкладка «Звук»: партии профиля, их инструменты и звучание.
-  import type { Part, PresetInfo, Profile, Sound } from "$lib/api";
-  import { addPart, canAddPart, defaultSound, hasDrums, isDrums, partUsage, presetName, removePart } from "$lib/sound";
+  import { onMount } from "svelte";
+  import { api, type BankEntry, type Input, type Part, type PresetInfo, type Profile, type SamplePad, type Sound } from "$lib/api";
+  import { noteName } from "$lib/labels";
+  import { setBinding } from "$lib/profileEdit";
+  import { addPart, canAddPart, defaultSound, drumName, hasDrums, isDrums, partUsage, presetName, removePart } from "$lib/sound";
   import InstrumentBrowser from "./InstrumentBrowser.svelte";
 
   let {
@@ -9,16 +12,117 @@
     presets,
     onchange,
     onaudition,
+    ontest,
   }: {
     profile: Profile;
     presets: PresetInfo[];
     onchange: () => void;
     onaudition: (part: number) => void;
+    /** Отправить сообщения (после применения свежих правок). */
+    ontest: (msgs: [number, number[]][]) => void;
   } = $props();
 
   let index = $state(0);
   const part = $derived(profile.parts[Math.min(index, profile.parts.length - 1)]);
   let confirmRemove = $state(false);
+
+  // ---------- источник звука партии ----------
+  let banks = $state<BankEntry[]>([]);
+  let partPresets = $state<PresetInfo[]>([]);
+  let loadError = $state<string | null>(null);
+  onMount(() => {
+    api.soundLibrary().then((b) => (banks = b));
+  });
+
+  const source = $derived(part?.source ?? { type: "default" as const });
+  const fontFile = $derived(source.type === "sound_font" ? source.file : null);
+
+  // Инструменты банка выбранной партии
+  $effect(() => {
+    const file = fontFile;
+    loadError = null;
+    if (!file) {
+      partPresets = presets;
+      return;
+    }
+    api.presetsFor(file).then(
+      (p) => (partPresets = p),
+      (e) => {
+        partPresets = [];
+        loadError = String(e);
+      },
+    );
+  });
+
+  function setSource(type: "default" | "sound_font" | "samples") {
+    edit((p) => {
+      if (type === "default") delete p.source;
+      else if (type === "sound_font") p.source = { type: "sound_font", file: banks[0]?.file ?? "" };
+      else p.source = { type: "samples", pads: [] };
+    });
+  }
+
+  async function addBank() {
+    const file = await api.addSoundfont();
+    if (!file) return;
+    banks = await api.soundLibrary();
+    edit((p) => (p.source = { type: "sound_font", file }));
+  }
+
+  const fileName = (f: string) => f.split(/[\\/]/).pop() ?? f;
+  const pads = $derived(source.type === "samples" ? source.pads : []);
+
+  function editPads(fn: (pads: SamplePad[]) => void) {
+    edit((p) => {
+      if (p.source?.type === "samples") fn(p.source.pads);
+    });
+  }
+
+  /** Следующая свободная нота: с 36, как у барабанов. */
+  function freeNote(list: SamplePad[]): number {
+    let n = 36;
+    while (list.some((x) => x.note === n) && n < 127) n++;
+    return n;
+  }
+
+  async function addSample() {
+    const file = await api.chooseSample();
+    if (file) editPads((list) => list.push({ note: freeNote(list), file, gain_db: 0, pitch: 0, choke: 0 }));
+  }
+
+  async function addKit() {
+    const files = await api.kitFromFolder();
+    if (files.length) editPads((list) => files.forEach((file) => list.push({ note: freeNote(list), file, gain_db: 0, pitch: 0, choke: 0 })));
+  }
+
+  function testPad(note: number) {
+    const ch = part.channel;
+    ontest([
+      [0, [0x90 | ch, note, 110]],
+      [300, [0x80 | ch, note, 0]],
+    ]);
+  }
+
+  /** Первые 8 пэдов — на четыре кнопки и крестовину основного слоя. */
+  const LAYOUT: Input[] = ["south", "east", "west", "north", "dpad_left", "dpad_down", "dpad_right", "dpad_up"].map(
+    (button) => ({ kind: "button", button }),
+  );
+  function layoutPads() {
+    const base = profile.layers[0];
+    pads.slice(0, 8).forEach((pad, i) => {
+      setBinding(base, LAYOUT[i], { kind: "note", note: { type: "absolute", note: pad.note }, part: index, velocity: 110, latch: "hold" });
+    });
+    onchange();
+    laidOut = true;
+  }
+  let laidOut = $state(false);
+
+  function partLabel(p: Part): string {
+    if (p.source?.type === "samples") return `Сэмплы (${p.source.pads.length})`;
+    if (p.source?.type === "sound_font") return `${fileName(p.source.file)} · ${p.program + 1}`;
+    return presetName(presets, p.bank, p.program);
+  }
+
 
   function edit(fn: (p: Part) => void) {
     fn(part);
@@ -121,7 +225,7 @@
     {#each profile.parts as p, i (i)}
       <button type="button" class="part" class:on={i === index} aria-pressed={i === index} onclick={() => ((index = i), (confirmRemove = false))}>
         <b>{p.name}</b>
-        <span>{presetName(presets, p.bank, p.program)}</span>
+        <span>{partLabel(p)}</span>
         <small>{isDrums(p) ? "ударные" : `канал ${p.channel + 1}`} · назначений: {partUsage(profile, i)}</small>
       </button>
     {/each}
@@ -135,12 +239,12 @@
   </aside>
 
   {#if part}
-    <section class="settings">
+    <section class="settings" class:wide={source.type === "samples"}>
       <div class="head">
         <input aria-label="Название партии" value={part.name} oninput={(e) => edit((p) => (p.name = e.currentTarget.value))} maxlength="30" />
         <button type="button" class="primary" onclick={() => onaudition(index)}>▶ Послушать</button>
       </div>
-      <p class="instrument">{presetName(presets, part.bank, part.program)}</p>
+      <p class="instrument">{source.type === "samples" ? `Сэмплы: ${pads.length}` : presetName(partPresets, part.bank, part.program)}</p>
       <label class="channel">
         <span>MIDI-канал</span>
         <select
@@ -163,6 +267,85 @@
       {#if profile.parts.some((x, j) => x.channel === part.channel && j !== index)}
         <p class="hint warn">На этом канале уже есть партия: инструменты будут мешать друг другу.</p>
       {/if}
+
+      <div class="source">
+        <span class="section-title">Звук партии</span>
+        <div class="seg">
+          {#each [["default", "Основной банк"], ["sound_font", "Свой .sf2"], ["samples", "Сэмплы"]] as [t, text] (t)}
+            <button type="button" class:on={source.type === t} aria-pressed={source.type === t} onclick={() => setSource(t as "default" | "sound_font" | "samples")}>
+              {text}
+            </button>
+          {/each}
+        </div>
+        {#if source.type === "sound_font"}
+          <div class="row">
+            <select
+              aria-label="Банк"
+              value={source.file}
+              onchange={(e) => {
+                const file = e.currentTarget.value;
+                edit((p) => (p.source = { type: "sound_font", file }));
+              }}
+            >
+              {#if !banks.some((b) => b.file === source.file)}<option value={source.file}>{fileName(source.file) || "— выбери банк —"}</option>{/if}
+              {#each banks as b (b.file)}<option value={b.file}>{b.name}</option>{/each}
+            </select>
+            <button type="button" class="ghost" onclick={addBank}>Добавить .sf2…</button>
+          </div>
+          {#if loadError}<p class="hint warn">{loadError}</p>{/if}
+          {#if !banks.length}
+            <p class="hint">В библиотеке пока нет своих банков — добавь .sf2 кнопкой выше (файл скопируется в библиотеку).</p>
+          {/if}
+        {:else if source.type === "samples"}
+          <p class="hint">One-shot: звук играет до конца. Группа глушения: новый звук группы глушит прежний (открытый хэт — закрытый).</p>
+          <div class="pads">
+            {#each pads as pad, i (i)}
+              <div class="pad">
+                <button type="button" class="play" aria-label="Послушать" onclick={() => testPad(pad.note)}>▶</button>
+                <label class="note">
+                  <input
+                    type="number"
+                    min="0"
+                    max="127"
+                    value={pad.note}
+                    aria-label="Нота"
+                    onchange={(e) => editPads((l) => (l[i].note = Math.max(0, Math.min(127, Number(e.currentTarget.value)))))}
+                  />
+                  <small>{(isDrums(part) && drumName(pad.note)) || noteName(pad.note)}</small>
+                </label>
+                <span class="file" title={pad.file}>{fileName(pad.file)}</span>
+                <button type="button" class="remove" aria-label="Убрать" onclick={() => editPads((l) => l.splice(i, 1))}>✕</button>
+                <div class="opts">
+                <label class="mini" title="Громкость, дБ">
+                  <input type="range" min="-24" max="6" step="1" value={pad.gain_db} oninput={(e) => editPads((l) => (l[i].gain_db = Number(e.currentTarget.value)))} />
+                  <small>{pad.gain_db > 0 ? "+" : ""}{pad.gain_db} дБ</small>
+                </label>
+                <label class="mini" title="Высота, полутоны">
+                  <input type="number" min="-24" max="24" value={pad.pitch} onchange={(e) => editPads((l) => (l[i].pitch = Number(e.currentTarget.value)))} />
+                  <small>пт.</small>
+                </label>
+                <select aria-label="Группа глушения" value={pad.choke} onchange={(e) => editPads((l) => (l[i].choke = Number(e.currentTarget.value)))}>
+                  <option value={0}>глуш. —</option>
+                  {#each [1, 2, 3, 4] as g (g)}<option value={g}>глуш. {g}</option>{/each}
+                </select>
+                </div>
+              </div>
+            {:else}
+              <p class="hint">Пэдов пока нет.</p>
+            {/each}
+          </div>
+          <div class="row">
+            <button type="button" class="ghost" onclick={addSample}>+ Сэмпл…</button>
+            <button type="button" class="ghost" onclick={addKit}>Кит из папки…</button>
+            {#if pads.length}
+              <button type="button" class="ghost" onclick={layoutPads} title="Первые 8 пэдов — на A, B, X, Y и крестовину основного слоя">
+                Разложить по кнопкам
+              </button>
+            {/if}
+          </div>
+          {#if laidOut}<p class="hint">Готово: пэды на кнопках A, B, X, Y и крестовине.</p>{/if}
+        {/if}
+      </div>
 
       {@render slider("Громкость", part.volume, (v) => edit((p) => (p.volume = v)), percent(part.volume))}
       {#each SLIDERS as s (s.key)}
@@ -189,9 +372,10 @@
       {/if}
     </section>
 
+    {#if source.type !== "samples"}
     <section class="instruments">
-      <div class="section-title">Инструмент</div>
-      <InstrumentBrowser {presets} {part} onpick={pick} onstar={star} />
+      <div class="section-title">Инструмент{fontFile ? ` · ${fileName(fontFile)}` : ""}</div>
+      <InstrumentBrowser presets={partPresets} {part} onpick={pick} onstar={star} />
       {#if !isDrums(part)}
         <p class="hint">
           ★ — быстрый список: по нему ходит команда «следующий инструмент»{part.instruments.length
@@ -200,6 +384,7 @@
         </p>
       {/if}
     </section>
+    {/if}
   {/if}
 </div>
 
@@ -300,6 +485,126 @@
     background: var(--raised);
   }
   .warn {
+    color: var(--error);
+  }
+  .settings.wide {
+    grid-column: span 2;
+  }
+  .source {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 0;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+  .source .seg {
+    display: flex;
+    gap: 4px;
+  }
+  .source .seg button {
+    flex: 1;
+    min-height: 32px;
+    border-radius: 8px;
+    border: 1px solid var(--line-strong);
+    background: transparent;
+    color: var(--muted);
+    font-size: 13px;
+  }
+  .source .seg button.on {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--text);
+  }
+  .source .row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .source select,
+  .pad input[type="number"] {
+    font: inherit;
+    color: var(--text);
+    min-height: 32px;
+    padding: 0 6px;
+    border-radius: 8px;
+    border: 1px solid var(--line-strong);
+    background: var(--raised);
+    min-width: 0;
+  }
+  .source .row select {
+    flex: 1;
+  }
+  .pads {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .pad {
+    display: grid;
+    grid-template-columns: 32px 92px minmax(0, 1fr) 30px;
+    align-items: center;
+    gap: 4px 6px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--line);
+    font-size: 13px;
+  }
+  .pad .opts {
+    grid-column: 2 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+  }
+  .pad .opts .mini {
+    flex: 0 0 auto;
+  }
+  .pad .opts .mini:first-child {
+    flex: 1 1 70px;
+  }
+  .pad .opts select {
+    flex: 0 0 auto;
+  }
+  .pad .note {
+    display: flex;
+    flex-direction: column;
+  }
+  .pad .note input {
+    width: 56px;
+  }
+  .pad small {
+    color: var(--muted);
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .pad .file {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pad .mini {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .pad .mini input[type="range"] {
+    accent-color: var(--accent);
+    min-width: 0;
+  }
+  .pad .mini input[type="number"] {
+    width: 48px;
+  }
+  .pad .play,
+  .pad .remove {
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    border: 1px solid var(--line-strong);
+    background: transparent;
+  }
+  .pad .remove:hover {
     color: var(--error);
   }
   .slider {

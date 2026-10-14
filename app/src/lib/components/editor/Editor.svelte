@@ -108,6 +108,15 @@
     }
   }
 
+  /** Отправить пробные сообщения — тоже после применения свежих правок. */
+  async function sendTest(msgs: [number, number[]][]) {
+    if (timer) {
+      clearTimeout(timer);
+      await push();
+    }
+    await api.sendTest(msgs);
+  }
+
   /** Послушать партию — сначала применить свежие правки, чтобы звучала новая настройка. */
   async function audition(part: number) {
     if (timer) {
@@ -302,7 +311,7 @@
     </div>
 
     {#if tab === "sound"}
-      <SoundPanel profile={draft} {presets} onchange={changed} onaudition={audition} />
+      <SoundPanel profile={draft} {presets} onchange={changed} onaudition={audition} ontest={sendTest} />
     {:else}
     <nav class="layers" aria-label="Слои раскладки">
       {#each draft.layers as l (l.id)}

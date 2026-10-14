@@ -11,11 +11,13 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use crate::audio::{AudioMode, PresetInfo, SoundBank, Synth};
+use crate::rack::{new_synth, Pad, RackConfig, Route, SampleData};
+use rustysynth::SoundFont;
 use crate::input::{self, GamepadInput, PadInfo, RawEvent};
 use crate::mapper::{ControlView, InputEvent, Mapper, Output};
 use crate::midi::{self, MidiMsg, Recorder, SmfOptions};
 use crate::midi_out::MidiOut;
-use crate::model::{Axis, Command as Action, Direction, Music, Profile, SwitchKey};
+use crate::model::{Axis, Command as Action, Direction, Music, PartSource, Profile, SwitchKey};
 use crate::transport::{self, Clock, LoopEffects, LoopState, Looper, Metronome, TransportSettings};
 use crate::wav;
 
@@ -88,6 +90,8 @@ pub struct EngineConfig {
     /// Где ещё искать звуковой банк (например, папка данных приложения).
     pub soundfont_dirs: Vec<PathBuf>,
     pub recordings_dir: PathBuf,
+    /// Папка библиотеки звуков: относительные пути .sf2 и сэмплов партий — от неё.
+    pub library_dir: PathBuf,
 }
 
 pub enum Command {
@@ -117,6 +121,8 @@ pub struct PartStatus {
     pub channel: u8,
     pub program: u8,
     pub instrument: String,
+    /// Почему не загрузился свой банк или сэмпл партии.
+    pub error: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -352,6 +358,13 @@ struct Runtime {
     wav_rx: Receiver<Result<String, String>>,
     exporting: usize,
     last_wav: Option<String>,
+    library_dir: PathBuf,
+    /// Загруженные свои банки и сэмплы — чтобы не перечитывать файлы.
+    font_cache: HashMap<PathBuf, Arc<SoundFont>>,
+    sample_cache: HashMap<PathBuf, Arc<SampleData>>,
+    /// Какие источники звука партий применены к стойке (канал, источник).
+    applied_sources: Option<Vec<(u8, PartSource)>>,
+    part_errors: Vec<Option<String>>,
     throttle: HashMap<(u8, u8, u8), Throttle>,
     started: Instant,
     last_tick: Instant,
@@ -402,6 +415,11 @@ impl Runtime {
             wav_rx,
             exporting: 0,
             last_wav: None,
+            library_dir: config.library_dir.clone(),
+            font_cache: HashMap::new(),
+            sample_cache: HashMap::new(),
+            applied_sources: None,
+            part_errors: Vec::new(),
             throttle: HashMap::new(),
             started: Instant::now(),
             last_tick: Instant::now(),
@@ -603,6 +621,7 @@ impl Runtime {
                     self.flush();
                     self.mapper = Mapper::new(*profile);
                 }
+                self.sync_sounds(false);
                 self.flush();
             }
             Command::SetMasterVolume(v) => {
@@ -793,7 +812,7 @@ impl Runtime {
             Ok(synth) => {
                 self.synth = Some(synth);
                 self.synth_error = None;
-                self.restore_synth_state();
+                self.sync_sounds(true);
             }
             Err(e) => self.synth_error = Some(format!("Звук: {e}")),
         }
@@ -814,6 +833,102 @@ impl Runtime {
             self.start_synth();
             self.dirty = true;
         }
+    }
+
+    fn resolve(&self, file: &str) -> PathBuf {
+        let p = PathBuf::from(file);
+        if p.is_absolute() { p } else { self.library_dir.join(p) }
+    }
+
+    fn load_font(&mut self, file: &str) -> Result<Arc<SoundFont>, String> {
+        let path = self.resolve(file);
+        if let Some(f) = self.font_cache.get(&path) {
+            return Ok(f.clone());
+        }
+        let font = SoundBank::load(&path).map(|b| b.font).map_err(|e| format!("банк «{file}»: {e}"))?;
+        self.font_cache.insert(path, font.clone());
+        Ok(font)
+    }
+
+    fn load_sample(&mut self, file: &str) -> Result<Arc<SampleData>, String> {
+        let path = self.resolve(file);
+        if let Some(s) = self.sample_cache.get(&path) {
+            return Ok(s.clone());
+        }
+        let data = Arc::new(SampleData::load_wav(&path).map_err(|e| format!("сэмпл «{file}»: {e}"))?);
+        self.sample_cache.insert(path, data.clone());
+        Ok(data)
+    }
+
+    /// Стойка под текущие партии: свои банки и сэмплы. Ошибки — в `part_errors`, такая партия
+    /// играет основным банком.
+    fn rack_config(&mut self, rate: u32) -> RackConfig {
+        let parts = self.mapper.profile().parts.clone();
+        let mut routes = [Route::Main; 16];
+        let mut extra = Vec::new();
+        let mut font_index: Vec<PathBuf> = Vec::new();
+        let mut pads = HashMap::new();
+        self.part_errors = vec![None; parts.len()];
+        for (i, p) in parts.iter().enumerate() {
+            let ch = p.channel as usize & 0x0F;
+            match &p.source {
+                PartSource::Default => {}
+                PartSource::SoundFont { file } => match self.load_font(file) {
+                    Ok(font) => {
+                        let path = self.resolve(file);
+                        let idx = match font_index.iter().position(|x| *x == path) {
+                            Some(idx) => idx,
+                            None => match new_synth(&font, rate) {
+                                Ok(s) => {
+                                    extra.push(s);
+                                    font_index.push(path);
+                                    extra.len() - 1
+                                }
+                                Err(e) => {
+                                    self.part_errors[i] = Some(e.to_string());
+                                    continue;
+                                }
+                            },
+                        };
+                        routes[ch] = Route::Font(idx);
+                    }
+                    Err(e) => self.part_errors[i] = Some(e),
+                },
+                PartSource::Samples { pads: list } => {
+                    routes[ch] = Route::Sampler;
+                    let mut errors = Vec::new();
+                    for pad in list {
+                        match self.load_sample(&pad.file) {
+                            Ok(data) => {
+                                let gain = 10f32.powf(pad.gain_db / 20.0);
+                                pads.insert((p.channel, pad.note), Pad { data, gain, pitch: pad.pitch as f32, choke: pad.choke });
+                            }
+                            Err(e) => errors.push(e),
+                        }
+                    }
+                    if !errors.is_empty() {
+                        self.part_errors[i] = Some(errors.join("; "));
+                    }
+                }
+            }
+        }
+        RackConfig { routes, extra, pads }
+    }
+
+    /// Применить источники звука партий к стойке (если они поменялись или `force`).
+    fn sync_sounds(&mut self, force: bool) {
+        let sig: Vec<(u8, PartSource)> = self.mapper.profile().parts.iter().map(|p| (p.channel, p.source.clone())).collect();
+        if !force && self.applied_sources.as_ref() == Some(&sig) {
+            return;
+        }
+        let Some(rate) = self.synth.as_ref().map(|s| s.sample_rate) else { return };
+        let cfg = self.rack_config(rate);
+        if let Some(synth) = &mut self.synth {
+            synth.configure(cfg);
+        }
+        self.applied_sources = Some(sig);
+        self.restore_synth_state();
+        self.dirty = true;
     }
 
     /// Найти и загрузить звуковой банк по настройкам. При ошибке прежний банк остаётся.
@@ -839,7 +954,9 @@ impl Runtime {
     fn audition(&mut self, part: usize) {
         let profile = self.mapper.profile();
         let Some(p) = profile.parts.get(part) else { return };
-        let notes: Vec<u8> = if p.channel == 9 {
+        let notes: Vec<u8> = if let PartSource::Samples { pads } = &p.source {
+            pads.iter().map(|x| x.note).take(8).collect()
+        } else if p.channel == 9 {
             vec![36, 42, 38, 42, 36, 36, 38, 46]
         } else {
             [0, 2, 4, 7, 4, 2, 0]
@@ -1099,15 +1216,23 @@ impl Runtime {
         }
         // WAV считается в фоне: синтезатор проигрывает запись заново, это может занять секунды
         if ts.export_wav
-            && let Some(bank) = &self.bank
+            && let Some(font) = self.bank.as_ref().map(|b| b.font.clone())
         {
-            let font = bank.font.clone();
+            // Стойка собирается здесь (файлы уже в кеше), считается в фоне
+            let cfg = self.rack_config(wav::SAMPLE_RATE);
+            let rack = match wav::rack(&font, cfg) {
+                Ok(r) => r,
+                Err(e) => {
+                    self.midi_error = Some(format!("WAV: {e}"));
+                    return;
+                }
+            };
             let gain = self.settings.master_volume;
             let wav_path = path.with_extension("wav");
             let tx = self.wav_tx.clone();
             self.exporting += 1;
             std::thread::spawn(move || {
-                let result = wav::export(&font, &events, gain, &wav_path)
+                let result = wav::export(rack, &events, gain, &wav_path)
                     .map(|()| wav_path.display().to_string())
                     .map_err(|e| e.to_string());
                 let _ = tx.send(result);
@@ -1122,16 +1247,31 @@ impl Runtime {
         let parts = profile
             .parts
             .iter()
-            .map(|p| PartStatus {
+            .enumerate()
+            .map(|(i, p)| PartStatus {
                 name: p.name.clone(),
                 channel: p.channel,
                 program: p.program,
-                instrument: self
-                    .bank
-                    .as_ref()
-                    .and_then(|b| b.preset_name(p.bank, p.program))
-                    .map(str::to_string)
-                    .unwrap_or_else(|| format!("Программа {}", p.program + 1)),
+                instrument: match &p.source {
+                    PartSource::Samples { pads } => format!("Сэмплы ({})", pads.len()),
+                    PartSource::SoundFont { file } => {
+                        let font = self.font_cache.get(&self.resolve(file));
+                        let name = font.and_then(|f| {
+                            f.get_presets()
+                                .iter()
+                                .find(|x| x.get_bank_number() == p.bank as i32 && x.get_patch_number() == p.program as i32)
+                                .map(|x| x.get_name().trim().to_string())
+                        });
+                        name.unwrap_or_else(|| format!("Программа {}", p.program + 1))
+                    }
+                    PartSource::Default => self
+                        .bank
+                        .as_ref()
+                        .and_then(|b| b.preset_name(p.bank, p.program))
+                        .map(str::to_string)
+                        .unwrap_or_else(|| format!("Программа {}", p.program + 1)),
+                },
+                error: self.part_errors.get(i).cloned().flatten(),
             })
             .collect();
         Status {

@@ -340,6 +340,42 @@ pub struct Part {
     pub transpose: i32,
     #[serde(default)]
     pub sound: Sound,
+    /// Откуда звук во встроенном синтезаторе (в MIDI-выход это не влияет).
+    #[serde(default, skip_serializing_if = "PartSource::is_default")]
+    pub source: PartSource,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum PartSource {
+    /// Основной звуковой банк программы.
+    #[default]
+    Default,
+    /// Свой банк .sf2: путь относительно папки библиотеки звуков (или полный).
+    SoundFont { file: String },
+    /// One-shot сэмплы на ноты (барабанный кит из своих WAV).
+    Samples { pads: Vec<SamplePad> },
+}
+
+impl PartSource {
+    pub fn is_default(&self) -> bool {
+        *self == PartSource::Default
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SamplePad {
+    pub note: u8,
+    /// WAV: путь относительно папки библиотеки звуков (или полный).
+    pub file: String,
+    #[serde(default)]
+    pub gain_db: f32,
+    /// Сдвиг высоты, полутоны.
+    #[serde(default)]
+    pub pitch: i32,
+    /// Группа глушения (0 — нет): новый звук группы глушит прежние.
+    #[serde(default)]
+    pub choke: u8,
 }
 
 /// Звучание партии — стандартные MIDI-контроллеры, их понимают и встроенный синтезатор, и DAW.

@@ -16,7 +16,7 @@ fn main() {
         ..Default::default()
     };
     let engine = Engine::start(
-        EngineConfig { profile, settings, soundfont_dirs: Vec::new(), recordings_dir: dir.clone() },
+        EngineConfig { profile, settings, soundfont_dirs: Vec::new(), recordings_dir: dir.clone(), library_dir: std::env::temp_dir() },
         |_| {},
     );
     std::thread::sleep(Duration::from_millis(500));

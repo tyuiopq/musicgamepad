@@ -88,6 +88,7 @@ pub fn classic() -> Profile {
             instruments: vec![0, 11, 24, 40, 56, 73, 79, 80],
             transpose: 0,
             sound: Sound::default(),
+            source: PartSource::Default,
         }],
         layers: vec![
             Layer { id: "base".into(), name: "Основной".into(), bindings: base, combo: vec![] },
@@ -135,6 +136,7 @@ fn part(name: &str, channel: u8, program: u8, bank: u16, instruments: Vec<u8>) -
         instruments,
         transpose: 0,
         sound: Sound::default(),
+        source: PartSource::Default,
     }
 }
 

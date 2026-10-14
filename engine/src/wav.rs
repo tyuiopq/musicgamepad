@@ -3,10 +3,10 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use anyhow::anyhow;
-use rustysynth::{SoundFont, Synthesizer, SynthesizerSettings};
+use rustysynth::SoundFont;
 
 use crate::midi::MidiMsg;
+use crate::rack::{new_synth, Rack, RackConfig};
 
 pub const SAMPLE_RATE: u32 = 48_000;
 const CHUNK: usize = 4096;
@@ -18,15 +18,13 @@ const TARGET_PEAK: f32 = 0.891;
 
 /// Отрисовать события (время в секундах) в стерео f32, нормализовав громкость.
 /// `gain` нужен только для полной тишины (тогда нормализовать нечего).
-pub fn render(font: &Arc<SoundFont>, events: &[(f64, MidiMsg)], gain: f32) -> anyhow::Result<(Vec<f32>, Vec<f32>)> {
-    let settings = SynthesizerSettings::new(SAMPLE_RATE as i32);
-    let mut synth = Synthesizer::new(font, &settings).map_err(|e| anyhow!("синтезатор: {e:?}"))?;
+pub fn render(mut synth: Rack, events: &[(f64, MidiMsg)], gain: f32) -> anyhow::Result<(Vec<f32>, Vec<f32>)> {
     let mut sorted: Vec<&(f64, MidiMsg)> = events.iter().collect();
     sorted.sort_by(|a, b| a.0.total_cmp(&b.0));
 
     let (mut left, mut right) = (Vec::new(), Vec::new());
     let (mut l, mut r) = (vec![0f32; CHUNK], vec![0f32; CHUNK]);
-    let mut render_to = |frame: usize, synth: &mut Synthesizer, left: &mut Vec<f32>, right: &mut Vec<f32>| {
+    let mut render_to = |frame: usize, synth: &mut Rack, left: &mut Vec<f32>, right: &mut Vec<f32>| {
         while left.len() < frame {
             let n = (frame - left.len()).min(CHUNK);
             synth.render(&mut l[..n], &mut r[..n]);
@@ -37,8 +35,7 @@ pub fn render(font: &Arc<SoundFont>, events: &[(f64, MidiMsg)], gain: f32) -> an
 
     for (t, msg) in sorted {
         render_to((t.max(0.0) * SAMPLE_RATE as f64) as usize, &mut synth, &mut left, &mut right);
-        let [status, d1, d2] = msg.bytes;
-        synth.process_midi_message((status & 0x0F) as i32, (status & 0xF0) as i32, d1 as i32, d2 as i32);
+        synth.process(*msg);
     }
 
     // Хвост: пока звучит (реверберация, затухание), но не дольше MAX_TAIL_S
@@ -85,8 +82,15 @@ pub fn wav_bytes(left: &[f32], right: &[f32]) -> Vec<u8> {
     out
 }
 
-pub fn export(font: &Arc<SoundFont>, events: &[(f64, MidiMsg)], gain: f32, path: &Path) -> anyhow::Result<()> {
-    let (l, r) = render(font, events, gain)?;
+/// Стойка для экспорта: основной синтезатор на частоте WAV плюс конфигурация партий.
+pub fn rack(font: &Arc<SoundFont>, cfg: RackConfig) -> anyhow::Result<Rack> {
+    let mut rack = Rack::new(new_synth(font, SAMPLE_RATE)?, SAMPLE_RATE);
+    rack.apply(cfg);
+    Ok(rack)
+}
+
+pub fn export(rack: Rack, events: &[(f64, MidiMsg)], gain: f32, path: &Path) -> anyhow::Result<()> {
+    let (l, r) = render(rack, events, gain)?;
     std::fs::write(path, wav_bytes(&l, &r))?;
     Ok(())
 }
