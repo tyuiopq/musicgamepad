@@ -25,13 +25,37 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": [
+      "nsis"
+    ],
+    "publisher": "MusicGamepad",
+    "copyright": "© 2026 MusicGamepad",
+    "category": "Music",
+    "shortDescription": "Геймпад как музыкальный инструмент",
+    "longDescription": "Играй на геймпаде как на инструменте: встроенный звук или MIDI в DAW, полная переназначаемость кнопок, стиков и курков.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "headerImage": "installer/header.bmp",
+        "sidebarImage": "installer/sidebar.bmp",
+        "languages": [
+          "Russian"
+        ],
+        "displayLanguageSelector": false,
+        "installMode": "currentUser",
+        "startMenuFolder": "MusicGamepad"
+      }
+    }
   }
 }
