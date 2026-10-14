@@ -24,7 +24,7 @@ function baseStatus(): Status {
     degree_shift: 0,
     notes: scene.notes,
     pressed: scene.pressed as Status["pressed"],
-    parts: [{ name: "Мелодия", channel: 0, program: 0, instrument: "Grand Piano", error: null }],
+    parts: [{ name: "Мелодия", channel: 0, program: 0, bank: 0, instrument: "Grand Piano", error: null }],
     synth: {
       enabled: true,
       soundfont: "C:\\assets\\GeneralUser-GS.sf2",

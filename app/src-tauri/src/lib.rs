@@ -1,6 +1,7 @@
 //! Оболочка Tauri: команды для интерфейса, настройки и профили на диске.
 
 mod profiles;
+mod safefile;
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -37,12 +38,27 @@ impl AppState {
         let mut s = self.settings.lock().unwrap();
         f(&mut s);
         if let Ok(json) = serde_json::to_string_pretty(&*s) {
-            let _ = std::fs::write(&self.settings_path, json);
+            let _ = safefile::write_atomic(&self.settings_path, json.as_bytes());
         }
+    }
+
+    /// Подставить инструменты, выбранные кнопкой в прошлый раз.
+    fn with_instruments(&self, mut profile: Profile) -> Profile {
+        let settings = self.settings.lock().unwrap();
+        if let Some(list) = settings.instruments.get(&profile.name)
+            && list.len() == profile.parts.len()
+        {
+            for (part, &(program, bank)) in profile.parts.iter_mut().zip(list) {
+                part.program = program;
+                part.bank = bank;
+            }
+        }
+        profile
     }
 
     /// Сделать профиль текущим: играть им и запомнить выбор.
     fn activate(&self, profile: Profile) {
+        let profile = self.with_instruments(profile);
         let name = profile.name.clone();
         *self.profile.lock().unwrap() = profile.clone();
         self.update_settings(|s| s.profile = Some(name));
@@ -284,6 +300,10 @@ fn apply_profile(state: State<AppState>, profile: Profile) -> CmdResult<()> {
 #[tauri::command]
 fn save_profile(state: State<AppState>, profile: Profile, previous: Option<String>) -> CmdResult<()> {
     state.profiles.save(&profile, previous.as_deref())?;
+    // Явно сохранённые инструменты важнее запомненных
+    state.update_settings(|s| {
+        s.instruments.remove(&profile.name);
+    });
     state.activate(profile);
     Ok(())
 }
@@ -335,6 +355,25 @@ fn set_pad_profile(state: State<AppState>, family: String, profile: Option<Strin
         None => {
             s.pad_profiles.remove(&family);
         }
+    });
+}
+
+/// Инструмент партии сменили кнопкой (Back и т.п.) — запомнить для этого профиля.
+fn remember_instruments(app: &AppHandle, name: &str, programs: &[(u8, u16)]) {
+    let Some(state) = app.try_state::<AppState>() else { return };
+    {
+        let mut profile = state.profile.lock().unwrap();
+        let same = profile.parts.iter().map(|p| (p.program, p.bank)).eq(programs.iter().copied());
+        if profile.name != name || profile.parts.len() != programs.len() || same {
+            return;
+        }
+        for (part, &(program, bank)) in profile.parts.iter_mut().zip(programs) {
+            part.program = program;
+            part.bank = bank;
+        }
+    }
+    state.update_settings(|s| {
+        s.instruments.insert(name.to_string(), programs.to_vec());
     });
 }
 
@@ -519,11 +558,16 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let settings_path = config_dir.join("settings.json");
     let profiles = ProfileStore::new(data_dir.join("profiles"));
 
-    let settings: Settings = std::fs::read_to_string(&settings_path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default();
-    let profile = settings.profile.as_deref().and_then(|name| profiles.find(name)).unwrap_or_else(presets::classic);
+    let settings: Settings = safefile::read_parsed(&settings_path, |s| serde_json::from_str(s).ok()).unwrap_or_default();
+    let mut profile = settings.profile.as_deref().and_then(|name| profiles.find(name)).unwrap_or_else(presets::classic);
+    if let Some(list) = settings.instruments.get(&profile.name)
+        && list.len() == profile.parts.len()
+    {
+        for (part, &(program, bank)) in profile.parts.iter_mut().zip(list) {
+            part.program = program;
+            part.bank = bank;
+        }
+    }
 
     let handle = app.handle().clone();
     let engine = Engine::start(
@@ -536,8 +580,18 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         },
         {
             let mut last_family: Option<String> = None;
+            let mut last_programs: Option<(String, Vec<(u8, u16)>)> = None;
             move |status: &Status| {
                 let _ = handle.emit("status", status);
+                // Инструменты поменялись в самом движке (не загрузкой профиля) — запоминаем
+                let programs: Vec<(u8, u16)> = status.parts.iter().map(|p| (p.program, p.bank)).collect();
+                if let Some((name, prev)) = &last_programs
+                    && *name == status.profile
+                    && *prev != programs
+                {
+                    remember_instruments(&handle, &status.profile, &programs);
+                }
+                last_programs = Some((status.profile.clone(), programs));
                 let family = status
                     .active_pad
                     .and_then(|id| status.pads.iter().find(|p| p.id == id))

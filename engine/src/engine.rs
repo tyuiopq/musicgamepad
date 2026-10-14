@@ -68,6 +68,9 @@ pub struct Settings {
     pub pad_profiles: HashMap<String, String>,
     /// Оформление интерфейса (движку не нужно, хранится вместе с настройками).
     pub ui: UiSettings,
+    /// Инструменты, выбранные кнопкой во время игры, — по профилям: (программа, банк) каждой партии.
+    /// Так выбор переживает перезапуск, а сам профиль (в т.ч. встроенный) не меняется.
+    pub instruments: HashMap<String, Vec<(u8, u16)>>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -92,6 +95,7 @@ impl Default for Settings {
             transport: TransportSettings::default(),
             pad_profiles: HashMap::new(),
             ui: UiSettings::default(),
+            instruments: HashMap::new(),
         }
     }
 }
@@ -132,6 +136,7 @@ pub struct PartStatus {
     pub name: String,
     pub channel: u8,
     pub program: u8,
+    pub bank: u16,
     pub instrument: String,
     /// Почему не загрузился свой банк или сэмпл партии.
     pub error: Option<String>,
@@ -1264,6 +1269,7 @@ impl Runtime {
                 name: p.name.clone(),
                 channel: p.channel,
                 program: p.program,
+                bank: p.bank,
                 instrument: match &p.source {
                     PartSource::Samples { pads } => format!("Сэмплы ({})", pads.len()),
                     PartSource::SoundFont { file } => {

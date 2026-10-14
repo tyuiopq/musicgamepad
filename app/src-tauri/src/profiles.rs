@@ -54,7 +54,7 @@ impl ProfileStore {
             .filter_map(|e| e.ok().map(|e| e.path()))
             .filter(|p| p.extension().is_some_and(|x| x == "json"))
             .filter_map(|p| {
-                let profile = Profile::from_json(&std::fs::read_to_string(&p).ok()?).ok()?;
+                let profile = crate::safefile::read_parsed(&p, |s| Profile::from_json(s).ok())?;
                 Some((p, profile))
             })
             .collect();
@@ -99,12 +99,13 @@ impl ProfileStore {
             .find(|(_, p)| p.name == profile.name)
             .map(|(path, _)| path.clone())
             .unwrap_or_else(|| self.dir.join(file_name_for(&profile.name)));
-        std::fs::write(&path, profile.to_json()).map_err(|e| e.to_string())?;
+        crate::safefile::write_atomic(&path, profile.to_json().as_bytes()).map_err(|e| e.to_string())?;
         if let Some(old) = previous.filter(|_| is_new_name)
             && let Some((old_path, _)) = files.iter().find(|(_, p)| p.name == old)
             && *old_path != path
         {
             let _ = std::fs::remove_file(old_path);
+            let _ = std::fs::remove_file(crate::safefile::backup_path(old_path));
         }
         Ok(())
     }
@@ -125,6 +126,7 @@ impl ProfileStore {
             .into_iter()
             .find(|(_, p)| p.name == name)
             .ok_or(format!("профиль «{name}» нельзя удалить"))?;
+        let _ = std::fs::remove_file(crate::safefile::backup_path(&path));
         std::fs::remove_file(path).map_err(|e| e.to_string())
     }
 }

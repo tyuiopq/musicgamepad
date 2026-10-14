@@ -267,6 +267,7 @@ export interface PartStatus {
   name: string;
   channel: number;
   program: number;
+  bank: number;
   instrument: string;
   error: string | null;
 }
