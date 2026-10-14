@@ -123,12 +123,16 @@
     ["prev_instrument", "Предыдущий инструмент"],
     ["toggle_record", "Запись: старт/стоп"],
     ["panic", "Тишина (заглушить всё)"],
+    ["toggle_metronome", "Метроном: вкл/выкл"],
+    ["loop_record", "Лупер: записать / наложить слой"],
+    ["loop_undo", "Лупер: отменить слой"],
+    ["loop_clear", "Лупер: очистить"],
   ];
 
   function setCommand(type: Command["type"]) {
     edit((a) => {
       if (a.kind !== "command") return;
-      a.command = type === "next_instrument" || type === "prev_instrument" ? { type, part: 0 } : { type };
+      a.command = type === "next_instrument" || type === "prev_instrument" ? { type, part: 0 } : ({ type } as Command);
     });
   }
 

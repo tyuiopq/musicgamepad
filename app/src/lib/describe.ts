@@ -76,6 +76,14 @@ export function roleLabel(v: ControlView, profile: Profile | null): string {
           return "запись";
         case "panic":
           return "тишина";
+        case "toggle_metronome":
+          return "метроном";
+        case "loop_record":
+          return "луп";
+        case "loop_undo":
+          return "отмена слоя";
+        case "loop_clear":
+          return "очистить луп";
       }
       break;
     case "control":

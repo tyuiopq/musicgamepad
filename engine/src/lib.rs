@@ -11,6 +11,8 @@ pub mod midi_out;
 pub mod model;
 pub mod presets;
 pub mod theory;
+pub mod transport;
+pub mod wav;
 
 pub use audio::AudioMode;
 pub use engine::{Command, Engine, EngineConfig, PadChoice, Settings, Status};

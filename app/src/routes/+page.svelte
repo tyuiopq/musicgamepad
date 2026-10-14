@@ -4,7 +4,9 @@
   import Editor from "$lib/components/editor/Editor.svelte";
   import Gamepad from "$lib/components/Gamepad.svelte";
   import PianoRoll from "$lib/components/PianoRoll.svelte";
+  import Recordings from "$lib/components/Recordings.svelte";
   import Sidebar from "$lib/components/Sidebar.svelte";
+  import Transport from "$lib/components/Transport.svelte";
   import { effectLabel } from "$lib/describe";
   import { keyLabel, noteName, solfege } from "$lib/labels";
 
@@ -13,7 +15,7 @@
   let profiles = $state<ProfileEntry[]>([]);
   let ports = $state<string[]>([]);
   let error = $state<string | null>(null);
-  let view = $state<"play" | "edit">(demoOption("view") === "edit" ? "edit" : "play");
+  let view = $state<"play" | "edit" | "records">((demoOption("view") as "edit" | "records" | null) ?? "play");
   let editorDirty = $state(false);
 
   async function refreshProfiles() {
@@ -111,6 +113,8 @@
         <Gamepad controls={status.controls} pressed={status.pressed} axes={status.axes} {family} {profile} />
       </section>
 
+      <Transport transport={status.transport} {run} />
+
       <section class="roll">
         <div class="roll-head">
           <span class="section-title">Последние ноты</span>
@@ -118,6 +122,9 @@
         </div>
         <PianoRoll notes={status.notes} {tonic} />
       </section>
+      {/if}
+      {#if view === "records"}
+        <Recordings {status} {run} />
       {/if}
     </main>
   </div>

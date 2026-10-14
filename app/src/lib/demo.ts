@@ -40,6 +40,26 @@ function baseStatus(): Status {
     recording: false,
     last_recording: "C:\\Users\\me\\Documents\\MusicGamepad\\melody_2026-10-13_15-02-11.mid",
     touched: null,
+    transport: {
+      settings: {
+        bpm: 100,
+        beats_per_bar: 4,
+        metronome: true,
+        metronome_volume: 0.6,
+        count_in: true,
+        quantize: "off",
+        loop_bars: 2,
+        export_wav: false,
+      },
+      bar: 3,
+      beat: 2,
+      record: "idle",
+      count_in_left: null,
+      record_seconds: 0,
+      looper: { state: "playing", layers: 2, progress: 0.35, bars: 2 },
+      exporting: 0,
+      last_wav: null,
+    },
   };
 }
 
@@ -76,6 +96,10 @@ export const demo: Record<string, (args?: Record<string, unknown>) => unknown> =
   preview_profile: (args) => (args?.layer === "chords" ? scene.chords : scene.controls),
   apply_profile: () => undefined,
   get_presets: () => scene.presets,
+  list_recordings: () => [
+    { name: "melody_2026-10-14_18-20-03", mid: "a.mid", wav: "a.wav", modified: "2026-10-14 18:20", bytes: 812345 },
+    { name: "melody_2026-10-13_15-02-11", mid: "b.mid", wav: null, modified: "2026-10-13 15:02", bytes: 2344 },
+  ],
   save_profile: () => undefined,
   toggle_record: () => {
     status = { ...status, recording: !status.recording };

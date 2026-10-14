@@ -82,7 +82,46 @@ export type Command =
   | { type: "next_instrument"; part: number }
   | { type: "prev_instrument"; part: number }
   | { type: "toggle_record" }
-  | { type: "panic" };
+  | { type: "panic" }
+  | { type: "toggle_metronome" }
+  | { type: "loop_record" }
+  | { type: "loop_undo" }
+  | { type: "loop_clear" };
+
+export type Quantize = "off" | "quarter" | "eighth" | "sixteenth" | "eighth_triplet";
+
+export interface TransportSettings {
+  bpm: number;
+  beats_per_bar: number;
+  metronome: boolean;
+  metronome_volume: number;
+  count_in: boolean;
+  quantize: Quantize;
+  loop_bars: number;
+  export_wav: boolean;
+}
+
+export type LoopState = "empty" | "armed" | "recording" | "playing" | "overdub";
+
+export interface TransportStatus {
+  settings: TransportSettings;
+  bar: number | null;
+  beat: number | null;
+  record: "idle" | "count_in" | "recording";
+  count_in_left: number | null;
+  record_seconds: number;
+  looper: { state: LoopState; layers: number; progress: number; bars: number };
+  exporting: number;
+  last_wav: string | null;
+}
+
+export interface RecordingEntry {
+  name: string;
+  mid: string | null;
+  wav: string | null;
+  modified: string;
+  bytes: number;
+}
 
 export type ControlTarget =
   | { type: "pitch_bend" }
@@ -198,6 +237,7 @@ export interface Status {
   recording: boolean;
   last_recording: string | null;
   touched: Touched | null;
+  transport: TransportStatus;
 }
 
 export type AudioMode = "exclusive" | "shared";
@@ -237,6 +277,11 @@ export const api = {
   audition: (part: number) => invoke<void>("audition", { part }),
   setMidiOut: (port: string | null) => invoke<void>("set_midi_out", { port }),
   toggleRecord: () => invoke<void>("toggle_record"),
+  setTransport: (settings: TransportSettings) => invoke<void>("set_transport", { settings }),
+  transportAction: (action: Command) => invoke<void>("transport_action", { action }),
+  listRecordings: () => invoke<RecordingEntry[]>("list_recordings"),
+  openRecording: (path: string) => invoke<void>("open_recording", { path }),
+  deleteRecording: (name: string) => invoke<void>("delete_recording", { name }),
   panic: () => invoke<void>("panic"),
   openRecordings: () => invoke<void>("open_recordings"),
   onStatus: async (cb: (s: Status) => void): Promise<UnlistenFn> => {

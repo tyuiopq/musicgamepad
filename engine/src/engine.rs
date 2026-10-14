@@ -13,9 +13,11 @@ use serde::{Deserialize, Serialize};
 use crate::audio::{AudioMode, PresetInfo, SoundBank, Synth};
 use crate::input::{self, GamepadInput, PadInfo, RawEvent};
 use crate::mapper::{ControlView, InputEvent, Mapper, Output};
-use crate::midi::{self, MidiMsg, Recorder};
+use crate::midi::{self, MidiMsg, Recorder, SmfOptions};
 use crate::midi_out::MidiOut;
-use crate::model::{Axis, Direction, Music, Profile, SwitchKey};
+use crate::model::{Axis, Command as Action, Direction, Music, Profile, SwitchKey};
+use crate::transport::{self, Clock, LoopEffects, LoopState, Looper, Metronome, TransportSettings};
+use crate::wav;
 
 /// Сколько ждать событий геймпада за один оборот цикла. Нажатия будят поток сразу,
 /// это лишь верхняя граница реакции на команды из интерфейса.
@@ -23,6 +25,8 @@ const POLL: Duration = Duration::from_millis(8);
 /// Не чаще ~60 обновлений состояния в секунду.
 const STATUS_INTERVAL: Duration = Duration::from_millis(16);
 const AUDIO_RETRY: Duration = Duration::from_secs(2);
+/// За сколько до начала цикла лупера отправлять его события в расписание.
+const LOOP_LOOKAHEAD: Duration = Duration::from_millis(30);
 
 /// Каким геймпадом играть.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -47,6 +51,7 @@ pub struct Settings {
     pub soundfont: Option<PathBuf>,
     pub pad: PadChoice,
     pub profile: Option<String>,
+    pub transport: TransportSettings,
 }
 
 impl Default for Settings {
@@ -59,6 +64,7 @@ impl Default for Settings {
             soundfont: None,
             pad: PadChoice::Auto,
             profile: None,
+            transport: TransportSettings::default(),
         }
     }
 }
@@ -84,6 +90,9 @@ pub enum Command {
     LoadProfile(Box<Profile>),
     ToggleRecord,
     Panic,
+    SetTransport(TransportSettings),
+    /// Метроном, лупер — то же, что кнопки геймпада.
+    Transport(Action),
     Shutdown,
 }
 
@@ -152,6 +161,49 @@ pub struct Status {
     pub recording: bool,
     pub last_recording: Option<String>,
     pub touched: Option<Touched>,
+    pub transport: TransportStatus,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecordPhase {
+    #[default]
+    Idle,
+    /// Отсчёт такта перед записью.
+    CountIn,
+    Recording,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct LooperStatus {
+    pub state: LoopState,
+    pub layers: usize,
+    /// Пройденная доля петли 0..1.
+    pub progress: f32,
+    pub bars: u8,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct TransportStatus {
+    pub settings: TransportSettings,
+    /// Такт и доля (с единицы), пока идут часы.
+    pub bar: Option<u64>,
+    pub beat: Option<u8>,
+    pub record: RecordPhase,
+    /// Сколько долей отсчёта осталось.
+    pub count_in_left: Option<u8>,
+    pub record_seconds: f64,
+    pub looper: LooperStatus,
+    /// Сколько WAV сейчас сохраняется.
+    pub exporting: usize,
+    pub last_wav: Option<String>,
+}
+
+/// Откуда отложенное событие — чтобы снимать события петли, не трогая остальные.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Source {
+    Audition,
+    Loop,
 }
 
 /// Последний контрол, которого коснулись на геймпаде (для «назначить с геймпада»).
@@ -224,8 +276,19 @@ struct Runtime {
     settings: Settings,
     recordings_dir: PathBuf,
     soundfont_dirs: Vec<PathBuf>,
-    /// Отложенные MIDI-сообщения (прослушивание инструмента).
-    scheduled: Vec<(Instant, MidiMsg)>,
+    /// Отложенные MIDI-сообщения (прослушивание инструмента, петля лупера).
+    scheduled: Vec<(Instant, MidiMsg, Source)>,
+    clock: Clock,
+    metronome: Metronome,
+    record_phase: RecordPhase,
+    count_in_at: Instant,
+    looper: Looper,
+    /// Ноты, включённые петлёй и ещё не выключенные.
+    loop_sounding: Vec<(u8, u8)>,
+    wav_tx: Sender<Result<String, String>>,
+    wav_rx: Receiver<Result<String, String>>,
+    exporting: usize,
+    last_wav: Option<String>,
     input: Option<GamepadInput>,
     input_error: Option<String>,
     active: Option<u32>,
@@ -249,11 +312,27 @@ struct Runtime {
 
 impl Runtime {
     fn new(config: EngineConfig, shared: Arc<Mutex<Shared>>) -> Self {
+        // Таймер Windows по умолчанию тикает раз в ~15 мс — метроному и луперу нужна 1 мс
+        #[cfg(windows)]
+        unsafe {
+            windows::Win32::Media::timeBeginPeriod(1);
+        }
+        let (wav_tx, wav_rx) = mpsc::channel();
         let mut rt = Self {
             shared,
             recordings_dir: config.recordings_dir,
             soundfont_dirs: config.soundfont_dirs.clone(),
             scheduled: Vec::new(),
+            clock: Clock::default(),
+            metronome: Metronome::default(),
+            record_phase: RecordPhase::Idle,
+            count_in_at: Instant::now(),
+            looper: Looper::default(),
+            loop_sounding: Vec::new(),
+            wav_tx,
+            wav_rx,
+            exporting: 0,
+            last_wav: None,
             input: None,
             input_error: None,
             active: None,
@@ -293,9 +372,10 @@ impl Runtime {
         let mut events = Vec::new();
         let mut last_status = Instant::now() - STATUS_INTERVAL;
         loop {
+            let timeout = self.next_wait(Instant::now());
             match self.input.as_mut() {
-                Some(input) => input.wait(POLL, &mut events),
-                None => std::thread::sleep(POLL),
+                Some(input) => input.wait(timeout, &mut events),
+                None => std::thread::sleep(timeout),
             }
             for event in events.drain(..) {
                 self.on_raw(event);
@@ -308,7 +388,9 @@ impl Runtime {
                 self.on_command(cmd);
             }
             self.check_audio();
+            self.tick_transport(Instant::now());
             self.run_scheduled();
+            self.poll_exports();
             if self.dirty && last_status.elapsed() >= STATUS_INTERVAL {
                 let status = self.status();
                 on_status(&status);
@@ -463,6 +545,8 @@ impl Runtime {
             }
             Command::Audition { part } => self.audition(part),
             Command::ToggleRecord => self.toggle_record(),
+            Command::SetTransport(ts) => self.set_transport(ts),
+            Command::Transport(action) => self.transport_action(action),
             Command::Panic => {
                 self.mapper.panic();
                 self.flush();
@@ -472,8 +556,12 @@ impl Runtime {
     }
 
     fn shutdown(&mut self) {
-        if self.recorder.is_some() {
+        if self.record_phase == RecordPhase::Recording {
             self.toggle_record();
+        }
+        #[cfg(windows)]
+        unsafe {
+            windows::Win32::Media::timeEndPeriod(1);
         }
         self.mapper.panic();
         self.flush();
@@ -485,10 +573,14 @@ impl Runtime {
     fn flush(&mut self) {
         self.outputs.extend(self.mapper.drain());
         let outputs = std::mem::take(&mut self.outputs);
+        let now = Instant::now();
         for out in &outputs {
-            match *out {
-                Output::Midi(msg) => self.dispatch(msg),
-                Output::ToggleRecord => self.toggle_record(),
+            match out {
+                Output::Midi(msg) => {
+                    self.dispatch(*msg);
+                    self.looper.capture(now, *msg);
+                }
+                Output::Command(action) => self.transport_action(action.clone()),
             }
         }
         self.outputs = outputs;
@@ -610,8 +702,8 @@ impl Runtime {
         let now = Instant::now();
         for (i, &n) in notes.iter().enumerate() {
             let on = now + Duration::from_millis(180 * i as u64);
-            self.scheduled.push((on, MidiMsg::note_on(ch, n, 100)));
-            self.scheduled.push((on + Duration::from_millis(160), MidiMsg::note_off(ch, n)));
+            self.scheduled.push((on, MidiMsg::note_on(ch, n, 100), Source::Audition));
+            self.scheduled.push((on + Duration::from_millis(160), MidiMsg::note_off(ch, n), Source::Audition));
         }
     }
 
@@ -620,32 +712,218 @@ impl Runtime {
             return;
         }
         let now = Instant::now();
-        let (due, later): (Vec<_>, Vec<_>) = self.scheduled.drain(..).partition(|(t, _)| *t <= now);
+        let (mut due, later): (Vec<_>, Vec<_>) = self.scheduled.drain(..).partition(|(t, _, _)| *t <= now);
         self.scheduled = later;
-        for (_, msg) in due {
+        due.sort_by_key(|(t, msg, _)| (*t, msg.is_note_on()));
+        for (_, msg, source) in due {
+            if source == Source::Loop {
+                let key = (msg.channel(), msg.bytes[1]);
+                if msg.is_note_on() {
+                    self.loop_sounding.push(key);
+                } else if msg.is_note_off() {
+                    self.loop_sounding.retain(|k| *k != key);
+                }
+            }
             self.dispatch(msg);
+        }
+    }
+
+    // ---------- метроном, отсчёт, лупер ----------
+
+    /// Сколько можно спать: до ближайшего щелчка, события или дела лупера, но не дольше POLL.
+    fn next_wait(&self, now: Instant) -> Duration {
+        let ts = &self.settings.transport;
+        let mut deadline = now + POLL;
+        let mut consider = |t: Option<Instant>| {
+            if let Some(t) = t {
+                deadline = deadline.min(t);
+            }
+        };
+        if self.clock_audible() {
+            consider(self.metronome.next_time(&self.clock, ts));
+        }
+        if self.record_phase == RecordPhase::CountIn {
+            consider(Some(self.count_in_at));
+        }
+        consider(self.scheduled.iter().map(|(t, _, _)| *t).min());
+        consider(self.looper.next_deadline(LOOP_LOOKAHEAD));
+        deadline.saturating_duration_since(now)
+    }
+
+    fn clock_audible(&self) -> bool {
+        self.settings.transport.metronome || self.record_phase == RecordPhase::CountIn
+    }
+
+    fn tick_transport(&mut self, now: Instant) {
+        if self.record_phase == RecordPhase::CountIn && now >= self.count_in_at {
+            self.recorder = Some(Recorder::start_at(self.count_in_at, self.mapper.state_messages()));
+            self.record_phase = RecordPhase::Recording;
+            self.dirty = true;
+        }
+
+        let fx = self.looper.tick(now, LOOP_LOOKAHEAD);
+        self.apply_loop(fx);
+
+        if self.clock.running() {
+            let ts = self.settings.transport.clone();
+            let clicks = self.metronome.due(&self.clock, now, &ts);
+            if self.clock_audible()
+                && self.settings.synth_enabled
+                && let Some(synth) = &mut self.synth
+            {
+                for accent in clicks {
+                    synth.send(transport::click(accent, ts.metronome_volume));
+                }
+            }
+            self.dirty = true;
+            // Часы больше никому не нужны — останавливаем
+            if !self.clock_audible() && self.looper.state == LoopState::Empty {
+                self.clock.stop();
+            }
+        }
+    }
+
+    /// Запустить часы, если стоят (доля 0 — сейчас).
+    fn ensure_clock(&mut self, now: Instant) -> bool {
+        if self.clock.running() {
+            return false;
+        }
+        self.clock.start(now);
+        self.metronome.sync(&self.clock, now, &self.settings.transport);
+        true
+    }
+
+    fn set_transport(&mut self, ts: TransportSettings) {
+        let now = Instant::now();
+        let old = std::mem::replace(&mut self.settings.transport, ts);
+        let new = self.settings.transport.clone();
+        if (old.bpm != new.bpm || old.beats_per_bar != new.beats_per_bar) && self.clock.running() {
+            self.clock.retempo(now, &old, &new);
+            self.metronome.sync(&self.clock, now, &new);
+        }
+        if new.metronome && !old.metronome && !self.ensure_clock(now) {
+            self.metronome.sync(&self.clock, now, &new);
+        }
+    }
+
+    fn transport_action(&mut self, action: Action) {
+        let now = Instant::now();
+        self.dirty = true;
+        match action {
+            Action::ToggleRecord => self.toggle_record(),
+            Action::ToggleMetronome => {
+                let mut ts = self.settings.transport.clone();
+                ts.metronome = !ts.metronome;
+                self.set_transport(ts);
+            }
+            Action::LoopRecord => {
+                self.ensure_clock(now);
+                let ts = self.settings.transport.clone();
+                let bar_start = self.clock.bar_start(now, &ts).unwrap_or(now);
+                let next_bar = self.clock.next_bar(now, &ts).unwrap_or(now);
+                let length = ts.bar_len() * ts.loop_bars.max(1) as u32;
+                let fx = self.looper.press(now, bar_start, next_bar, length);
+                self.apply_loop(fx);
+            }
+            Action::LoopUndo => {
+                let fx = self.looper.undo(now);
+                self.apply_loop(fx);
+            }
+            Action::LoopClear => {
+                let fx = self.looper.clear();
+                self.apply_loop(fx);
+            }
+            Action::Panic | Action::NextInstrument { .. } | Action::PrevInstrument { .. } => {}
+        }
+    }
+
+    fn apply_loop(&mut self, fx: LoopEffects) {
+        if fx.silence {
+            self.scheduled.retain(|(_, _, s)| *s != Source::Loop);
+            for (ch, note) in std::mem::take(&mut self.loop_sounding) {
+                self.dispatch(MidiMsg::note_off(ch, note));
+            }
+            self.dirty = true;
+        }
+        for (t, msg) in fx.schedule {
+            self.scheduled.push((t, msg, Source::Loop));
+        }
+    }
+
+    fn poll_exports(&mut self) {
+        while let Ok(result) = self.wav_rx.try_recv() {
+            self.exporting = self.exporting.saturating_sub(1);
+            match result {
+                Ok(path) => self.last_wav = Some(path),
+                Err(e) => self.midi_error = Some(format!("WAV не сохранился: {e}")),
+            }
+            self.dirty = true;
         }
     }
 
     // ---------- запись ----------
 
+    /// Запись: старт (с отсчётом такта, если включён) → стоп и сохранение.
     fn toggle_record(&mut self) {
         self.dirty = true;
-        match self.recorder.take() {
-            None => self.recorder = Some(Recorder::start(self.mapper.state_messages())),
-            Some(rec) => {
+        let now = Instant::now();
+        let ts = self.settings.transport.clone();
+        match self.record_phase {
+            RecordPhase::Idle if ts.count_in => {
+                let fresh = self.ensure_clock(now);
+                self.count_in_at = if fresh { now + ts.bar_len() } else { self.clock.next_bar(now, &ts).unwrap_or(now) };
+                self.record_phase = RecordPhase::CountIn;
+            }
+            RecordPhase::Idle => {
+                // Если идут часы — начало записи на начале такта, чтобы ноты легли на сетку
+                let t0 = self.clock.bar_start(now, &ts).unwrap_or(now);
+                self.recorder = Some(Recorder::start_at(t0, self.mapper.state_messages()));
+                self.record_phase = RecordPhase::Recording;
+            }
+            RecordPhase::CountIn => self.record_phase = RecordPhase::Idle,
+            RecordPhase::Recording => {
+                self.record_phase = RecordPhase::Idle;
+                let Some(rec) = self.recorder.take() else { return };
                 if !rec.has_notes() {
                     self.last_recording = None;
                     return;
                 }
-                let events = rec.finish(self.mapper.sounding());
-                let name = chrono::Local::now().format("melody_%Y-%m-%d_%H-%M-%S.mid").to_string();
-                let path = self.recordings_dir.join(name);
-                match midi::write_smf(&path, &events) {
-                    Ok(()) => self.last_recording = Some(path.display().to_string()),
-                    Err(e) => self.midi_error = Some(format!("Не удалось сохранить запись: {e}")),
-                }
+                let mut sounding = self.mapper.sounding();
+                sounding.extend(self.loop_sounding.iter().copied());
+                let events = rec.finish(sounding);
+                self.save_recording(events);
             }
+        }
+    }
+
+    fn save_recording(&mut self, events: Vec<(f64, MidiMsg)>) {
+        let ts = &self.settings.transport;
+        let names: Vec<(u8, String)> = self.mapper.profile().parts.iter().map(|p| (p.channel, p.name.clone())).collect();
+        let opts = SmfOptions { bpm: ts.bpm as f64, beats_per_bar: ts.beats_per_bar, quantize: ts.quantize, track_names: &names };
+        let name = chrono::Local::now().format("melody_%Y-%m-%d_%H-%M-%S.mid").to_string();
+        let path = self.recordings_dir.join(name);
+        match midi::write_smf(&path, &events, &opts) {
+            Ok(()) => self.last_recording = Some(path.display().to_string()),
+            Err(e) => {
+                self.midi_error = Some(format!("Не удалось сохранить запись: {e}"));
+                return;
+            }
+        }
+        // WAV считается в фоне: синтезатор проигрывает запись заново, это может занять секунды
+        if ts.export_wav
+            && let Some(bank) = &self.bank
+        {
+            let font = bank.font.clone();
+            let gain = self.settings.master_volume;
+            let wav_path = path.with_extension("wav");
+            let tx = self.wav_tx.clone();
+            self.exporting += 1;
+            std::thread::spawn(move || {
+                let result = wav::export(&font, &events, gain, &wav_path)
+                    .map(|()| wav_path.display().to_string())
+                    .map_err(|e| e.to_string());
+                let _ = tx.send(result);
+            });
         }
     }
 
@@ -700,9 +978,37 @@ impl Runtime {
                 }),
             },
             midi: MidiStatus { port: self.midi_out.as_ref().map(|m| m.port.clone()), error: self.midi_error.clone() },
-            recording: self.recorder.is_some(),
+            recording: self.record_phase == RecordPhase::Recording,
             last_recording: self.last_recording.clone(),
             touched: self.touched.clone(),
+            transport: self.transport_status(),
+        }
+    }
+
+    fn transport_status(&self) -> TransportStatus {
+        let now = Instant::now();
+        let ts = &self.settings.transport;
+        let bpb = ts.beats_per_bar.max(1) as u64;
+        let beats = self.clock.beats(now, ts).map(|b| b.floor() as u64);
+        let count_in_left = (self.record_phase == RecordPhase::CountIn).then(|| {
+            let left = self.count_in_at.saturating_duration_since(now).as_secs_f64() / ts.beat_len().as_secs_f64();
+            left.ceil() as u8
+        });
+        TransportStatus {
+            settings: ts.clone(),
+            bar: beats.map(|b| b / bpb + 1),
+            beat: beats.map(|b| (b % bpb + 1) as u8),
+            record: self.record_phase,
+            count_in_left,
+            record_seconds: self.recorder.as_ref().map_or(0.0, |r| r.elapsed()),
+            looper: LooperStatus {
+                state: self.looper.state,
+                layers: self.looper.layers(),
+                progress: self.looper.progress(now),
+                bars: ts.loop_bars,
+            },
+            exporting: self.exporting,
+            last_wav: self.last_wav.clone(),
         }
     }
 }

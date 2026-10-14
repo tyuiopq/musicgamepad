@@ -187,6 +187,13 @@ pub enum Command {
     ToggleRecord,
     /// Заглушить всё.
     Panic,
+    ToggleMetronome,
+    /// Лупер: начать петлю / наложить слой / закончить слой.
+    LoopRecord,
+    /// Лупер: отменить последний слой.
+    LoopUndo,
+    /// Лупер: очистить.
+    LoopClear,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]

@@ -18,8 +18,8 @@
     ports: string[];
     run: (action: () => Promise<unknown>) => void;
     refreshPorts: () => Promise<void>;
-    view: "play" | "edit";
-    onview: (v: "play" | "edit") => void;
+    view: "play" | "edit" | "records";
+    onview: (v: "play" | "edit" | "records") => void;
     editorDirty: boolean;
   } = $props();
 
@@ -50,6 +50,9 @@
     </button>
     <button type="button" role="tab" aria-selected={view === "edit"} class:on={view === "edit"} onclick={() => onview("edit")}>
       Профиль{#if editorDirty}<span class="dirty" title="Есть несохранённые изменения">•</span>{/if}
+    </button>
+    <button type="button" role="tab" aria-selected={view === "records"} class:on={view === "records"} onclick={() => onview("records")}>
+      Записи
     </button>
   </div>
 
@@ -185,8 +188,12 @@
       Сохранено: {fileName(status.last_recording)}
     </button>
   {/if}
-  <button class="rec" class:on={status.recording} onclick={() => run(api.toggleRecord)}>
-    <span class="dot"></span>{status.recording ? "Остановить запись" : "Запись"}
+  <button class="rec" class:on={status.transport.record !== "idle"} onclick={() => run(api.toggleRecord)}>
+    <span class="dot"></span>{status.transport.record === "count_in"
+      ? `Отсчёт… ${status.transport.count_in_left ?? ""}`
+      : status.recording
+        ? "Остановить запись"
+        : "Запись"}
   </button>
 </nav>
 
@@ -205,7 +212,7 @@
   }
   .views {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 4px;
     padding: 4px;
     border-radius: 12px;
@@ -214,6 +221,8 @@
   }
   .views button {
     min-height: 36px;
+    padding: 0 2px;
+    font-size: 14px;
     border: none;
     border-radius: 8px;
     background: transparent;

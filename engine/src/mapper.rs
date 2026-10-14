@@ -36,7 +36,8 @@ pub enum Role {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Output {
     Midi(MidiMsg),
-    ToggleRecord,
+    /// Команда для движка: запись, метроном, лупер.
+    Command(Command),
 }
 
 /// Насколько ось должна вернуться ниже порога, чтобы «кнопка» на ней отпустилась.
@@ -347,8 +348,8 @@ impl Mapper {
         match command {
             Command::NextInstrument { part } => self.step_instrument(part, 1),
             Command::PrevInstrument { part } => self.step_instrument(part, -1),
-            Command::ToggleRecord => self.out.push(Output::ToggleRecord),
             Command::Panic => self.panic(),
+            other => self.out.push(Output::Command(other)),
         }
     }
 
@@ -695,7 +696,7 @@ mod tests {
         btn(&mut m, Button::Back, true);
         assert_eq!(midi(&mut m), [MidiMsg::program(0, 11)]);
         btn(&mut m, Button::Start, true);
-        assert_eq!(m.drain().collect::<Vec<_>>(), [Output::ToggleRecord]);
+        assert_eq!(m.drain().collect::<Vec<_>>(), [Output::Command(Command::ToggleRecord)]);
     }
 
     /// X — модификатор слоя, в котором правый стик управляет яркостью вместо подтяжки.

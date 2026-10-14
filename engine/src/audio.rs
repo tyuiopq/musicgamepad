@@ -95,11 +95,36 @@ fn first_sf2(dir: &Path) -> Option<PathBuf> {
     files.into_iter().next()
 }
 
+/// Щелчок метронома: короткий затухающий тон, микшируется поверх синтезатора.
+struct Click {
+    pos: u32,
+    len: u32,
+    step: f32,
+    amp: f32,
+    decay: f32,
+}
+
+impl Click {
+    fn new(level: u8, accent: bool, sample_rate: u32) -> Self {
+        let rate = sample_rate as f32;
+        let freq = if accent { 1600.0 } else { 1100.0 };
+        Self {
+            pos: 0,
+            len: (0.04 * rate) as u32,
+            step: std::f32::consts::TAU * freq / rate,
+            amp: level as f32 / 127.0 * 0.5,
+            decay: (-1.0 / (0.006 * rate)).exp(),
+        }
+    }
+}
+
 /// Синтезатор внутри аудиопотока: забирает MIDI из очереди и считает звук.
 pub(crate) struct SynthCore {
     synth: Synthesizer,
     rx: Consumer<MidiMsg>,
     shared: Arc<AudioShared>,
+    sample_rate: u32,
+    clicks: Vec<Click>,
     left: Vec<f32>,
     right: Vec<f32>,
 }
@@ -114,13 +139,17 @@ impl SynthCore {
         let mut settings = SynthesizerSettings::new(sample_rate as i32);
         settings.block_size = SYNTH_BLOCK;
         let synth = Synthesizer::new(font, &settings).map_err(|e| anyhow!("синтезатор: {e:?}"))?;
-        Ok(Self { synth, rx, shared, left: vec![0.0; 4096], right: vec![0.0; 4096] })
+        Ok(Self { synth, rx, shared, sample_rate, clicks: Vec::with_capacity(4), left: vec![0.0; 4096], right: vec![0.0; 4096] })
     }
 
     /// Применить пришедший MIDI и посчитать `frames` кадров.
     pub(crate) fn render(&mut self, frames: usize) -> (&[f32], &[f32]) {
         while let Ok(m) = self.rx.pop() {
             let [status, d1, d2] = m.bytes;
+            if status == crate::transport::CLICK_STATUS {
+                self.clicks.push(Click::new(d1, d2 != 0, self.sample_rate));
+                continue;
+            }
             self.synth.process_midi_message((status & 0x0F) as i32, (status & 0xF0) as i32, d1 as i32, d2 as i32);
         }
         if self.left.len() < frames {
@@ -133,6 +162,20 @@ impl SynthCore {
             self.left[..frames].iter_mut().for_each(|s| *s *= gain);
             self.right[..frames].iter_mut().for_each(|s| *s *= gain);
         }
+        for c in &mut self.clicks {
+            let mut env = c.amp * c.decay.powi(c.pos as i32);
+            for i in 0..frames {
+                if c.pos >= c.len {
+                    break;
+                }
+                let v = (c.pos as f32 * c.step).sin() * env;
+                self.left[i] += v;
+                self.right[i] += v;
+                env *= c.decay;
+                c.pos += 1;
+            }
+        }
+        self.clicks.retain(|c| c.pos < c.len);
         (&self.left[..frames], &self.right[..frames])
     }
 }
