@@ -8,6 +8,10 @@ on:
   push:
     tags: ["v*"]
 
+# Чтобы прикрепить файлы к релизу
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
