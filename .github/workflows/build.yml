@@ -1,0 +1,67 @@
+# Сборка установщиков: macOS (.dmg, Apple Silicon + Intel) и Windows (setup.exe).
+# Запуск: вкладка Actions → «Сборка» → Run workflow, или push тега v* — тогда файлы
+# прикрепляются к релизу на GitHub.
+name: Сборка
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            name: macOS
+            args: --target universal-apple-darwin
+            rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
+            files: target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          - os: windows-latest
+            name: Windows
+            args: ""
+            rust_targets: ""
+            files: target/release/bundle/nsis/*-setup.exe
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Зависимости интерфейса
+        working-directory: app
+        run: pnpm install --frozen-lockfile
+
+      - name: Тесты ядра
+        run: cargo test -p engine --release
+
+      - name: Сборка
+        working-directory: app
+        run: pnpm tauri build ${{ matrix.args }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MusicGamepad-${{ matrix.name }}
+          path: ${{ matrix.files }}
+          if-no-files-found: error
+
+      - name: Прикрепить к релизу
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.files }}

@@ -1,6 +1,6 @@
 <script lang="ts">
   // Настройка одного входа: роль (нота, аккорд, модификатор, команда, контроллер) и её параметры.
-  import { api, type Action, type AxisMode, type AxisShape, type Binding, type ChordKind, type Command, type ControlTarget, type Latch, type ModEffect, type PresetInfo, type Profile, type VelocitySource } from "$lib/api";
+  import { api, MOD, type Action, type AxisMode, type AxisShape, type Binding, type ChordKind, type Command, type ControlTarget, type Latch, type ModEffect, type PresetInfo, type Profile, type VelocitySource } from "$lib/api";
   import { untrack } from "svelte";
   import type { Slot } from "$lib/controls";
   import { DEFAULT_THRESHOLD } from "$lib/controls";
@@ -722,7 +722,7 @@
     {:else}
       {@render range("Нажата", cc.on, 0, 127, 1, (v) => edit((a) => a.kind === "cc" && (a.on = v)), String(cc.on))}
       {@render range("Отпущена", cc.off, 0, 127, 1, (v) => edit((a) => a.kind === "cc" && (a.off = v)), String(cc.off))}
-      <p class="hint">В Ableton: Ctrl+M → кликни Play, Record или любую кнопку → нажми эту кнопку геймпада.</p>
+      <p class="hint">В Ableton: {MOD}M → кликни Play, Record или любую кнопку → нажми эту кнопку геймпада.</p>
     {/if}
   {/if}
 

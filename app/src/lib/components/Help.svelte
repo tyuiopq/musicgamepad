@@ -1,6 +1,6 @@
 <script lang="ts">
   // Подсказка «?»: что делают кнопки прямо сейчас и короткий словарик.
-  import type { ControlView, PadFamily, Profile, Status } from "$lib/api";
+  import { isMac, MOD, type ControlView, type PadFamily, type Profile, type Status } from "$lib/api";
   import { roleLabel } from "$lib/describe";
   import { inputName, noteName } from "$lib/labels";
 
@@ -89,7 +89,7 @@
       <dl class="words">
         <dt>F1</dt>
         <dd>эта подсказка</dd>
-        <dt>Ctrl+Z / Ctrl+Y</dt>
+        <dt>{MOD}Z / {isMac ? "⌘⇧Z" : "Ctrl+Y"}</dt>
         <dd>отменить / вернуть правку на экране «Профиль»</dd>
       </dl>
     </section>

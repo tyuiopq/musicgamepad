@@ -1,7 +1,7 @@
 <script lang="ts">
   // Экран «Настройки»: геймпады, звук, MIDI-выход, оформление.
   import { onMount } from "svelte";
-  import { api, type Calibration, type ProfileEntry, type Status } from "$lib/api";
+  import { api, isMac, type Calibration, type ProfileEntry, type Status } from "$lib/api";
   import { familyName } from "$lib/labels";
   import { applyTheme, DEFAULT_THEME, PRESETS, validTheme, type Theme } from "$lib/theme";
   import Calibrate from "./Calibrate.svelte";
@@ -153,6 +153,7 @@
         Встроенный синтезатор
         <input type="checkbox" class="switch" checked={status.synth.enabled} onchange={(e) => run(() => api.setSynthEnabled(e.currentTarget.checked))} />
       </label>
+      {#if !isMac}
       <label class="toggle" title="Эксклюзивный режим Windows: звук идёт напрямую в устройство">
         Низкая задержка
         <input
@@ -172,6 +173,7 @@
           Обычный режим: звучит вместе с другими программами, задержка больше.
         {/if}
       </p>
+      {/if}
       <div class="field" style="--value-w: 80px">
         <span class="label">Задержка</span>
         <span class="xs muted ellipsis">
@@ -225,12 +227,17 @@
       </div>
       {#if status.midi.error}<p class="error">{status.midi.error}</p>{/if}
       <p class="hint">
-        Для DAW (Ableton, FL Studio…) создай порт в бесплатной программе loopMIDI и выбери его здесь. Встроенный синтезатор тогда лучше выключить.
+        {#if isMac}
+          Для DAW (Logic, Ableton, FL Studio…) выбери «MusicGamepad (виртуальный порт)» — DAW увидит его как MIDI-вход «MusicGamepad». Встроенный
+          синтезатор тогда лучше выключить.
+        {:else}
+          Для DAW (Ableton, FL Studio…) создай порт в бесплатной программе loopMIDI и выбери его здесь. Встроенный синтезатор тогда лучше выключить.
+        {/if}
       </p>
       <div class="sep"></div>
       <label class="toggle" title="Пока идёт метроном или лупер — 24 тика на долю, Start при запуске, Stop при остановке">
         <span class="stack" style="--gap: 2px"
-          >MIDI Clock в DAW <span class="xs muted">В Ableton: у входа loopMIDI включи Sync</span></span
+          >MIDI Clock в DAW <span class="xs muted">В Ableton: у входа {isMac ? "MusicGamepad" : "loopMIDI"} включи Sync</span></span
         >
         <input type="checkbox" class="switch" checked={ts.send_clock} onchange={(e) => run(() => api.setTransport({ ...ts, send_clock: e.currentTarget.checked }))} />
       </label>
@@ -262,7 +269,9 @@
       {/if}
       <p class="hint">
         DAW ведёт темп, а Play в DAW запускает здесь метроном, лупер и живое квантование — всё в долю. Отправка MIDI Clock в DAW при этом
-        выключается, чтобы часы не ходили по кругу. Для приёма нужен второй порт loopMIDI (из DAW сюда).
+        выключается, чтобы часы не ходили по кругу. {isMac
+          ? "Для приёма выбери «MusicGamepad Clock (виртуальный порт)» и в DAW отправляй на него MIDI Clock."
+          : "Для приёма нужен второй порт loopMIDI (из DAW сюда)."}
       </p>
       {#if status.midi.extra?.length}
         <div class="sep"></div>

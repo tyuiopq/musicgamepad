@@ -5,6 +5,8 @@
   import {
     api,
     demoOption,
+    isMac,
+    MOD,
     type Binding,
     type ControlView,
     type Input,
@@ -352,8 +354,8 @@
         <span class="status" class:dirty>{dirty ? "Не сохранено" : "Сохранено"}</span>
         <span class="spacer"></span>
         <div class="row" style="--gap: 2px">
-          <button type="button" class="btn btn-ghost btn-icon history" title="Отменить правку (Ctrl+Z)" aria-label="Отменить правку" disabled={!undoStack.length} onclick={undo}>↶</button>
-          <button type="button" class="btn btn-ghost btn-icon history" title="Вернуть правку (Ctrl+Y)" aria-label="Вернуть правку" disabled={!redoStack.length} onclick={redo}>↷</button>
+          <button type="button" class="btn btn-ghost btn-icon history" title="Отменить правку ({MOD}Z)" aria-label="Отменить правку" disabled={!undoStack.length} onclick={undo}>↶</button>
+          <button type="button" class="btn btn-ghost btn-icon history" title="Вернуть правку ({isMac ? "⌘⇧Z" : "Ctrl+Y"})" aria-label="Вернуть правку" disabled={!redoStack.length} onclick={redo}>↷</button>
         </div>
         <button
           type="button"

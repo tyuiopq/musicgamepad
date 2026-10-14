@@ -164,10 +164,18 @@ const CC_PLAY: u8 = 85;
 const CC_RECORD: u8 = 86;
 const CC_EXTRA: u8 = 87;
 
+/// Как порт MusicGamepad называется в DAW: на Windows его создаёт loopMIDI, на macOS — сама программа.
+const PORT: &str = if cfg!(target_os = "macos") { "MusicGamepad" } else { "loopMIDI Port" };
+
 fn loopmidi_steps() -> Vec<SetupStep> {
+    if cfg!(target_os = "macos") {
+        return vec![step(
+            "Здесь, в «Настройках»: выбери MIDI-выход «MusicGamepad (виртуальный порт)» — программа сама создаст порт, DAW увидит его как вход «MusicGamepad». Выключи «Встроенный синтезатор», чтобы звук не двоился.",
+        )];
+    }
     vec![
-        step("Установи бесплатную программу loopMIDI и создай в ней порт (например, «loopMIDI Port»). Это «провод» от MusicGamepad к DAW."),
-        step("Здесь, в «Настройках»: выбери MIDI-выход «loopMIDI Port» и выключи «Встроенный синтезатор», чтобы звук не двоился."),
+        step(&format!("Установи бесплатную программу loopMIDI и создай в ней порт (например, «{PORT}»). Это «провод» от MusicGamepad к DAW.")),
+        step(&format!("Здесь, в «Настройках»: выбери MIDI-выход «{PORT}» и выключи «Встроенный синтезатор», чтобы звук не двоился.")),
     ]
 }
 
@@ -267,13 +275,13 @@ const KEYS_DESCRIPTION: &str = "Ноты — крестовина и кнопк�
 pub fn ableton_keys() -> Profile {
     let mut setup = loopmidi_steps();
     setup.extend([
-        step("В Ableton: Options → Preferences → Link, Tempo & MIDI. У входа «loopMIDI Port» включи Track и Remote."),
+        step(&format!("В Ableton: Options → Preferences → Link, Tempo & MIDI. У входа «{PORT}» включи Track и Remote.")),
         step("Создай MIDI-трек с инструментом и включи у него запись (Arm) — уже можно играть. В Ableton средняя «до» называется C3: это та же нота, что C4 здесь."),
         learn_step("Play: нажми Ctrl+M, кликни кнопку Play в Ableton и нажми Back на геймпаде.", button(Button::Back)),
         learn_step("Record: в том же режиме кликни Record и нажми Start.", button(Button::Start)),
         learn_step("Ручки: в режиме Ctrl+M кликни макрос или ручку инструмента и наклони левый стик влево-вправо…", Input::Axis { axis: Axis::LeftX }),
         learn_step("…а вторую ручку — наклоном вверх-вниз. Ctrl+M ещё раз — выйти из режима.", Input::Axis { axis: Axis::LeftY }),
-        step("По желанию — темп: в «Запись → ⚙» включи «MIDI Clock в DAW», а в Ableton у входа loopMIDI — Sync. Тогда метроном здесь ведёт темп Ableton."),
+        step(&format!("По желанию — темп: в «Запись → ⚙» включи «MIDI Clock в DAW», а в Ableton у входа {PORT} — Sync. Тогда метроном здесь ведёт темп Ableton.")),
     ]);
     Profile {
         name: "Ableton Live: клавиши".into(),
@@ -292,7 +300,7 @@ pub fn ableton_keys() -> Profile {
 pub fn fl_keys() -> Profile {
     let mut setup = loopmidi_steps();
     setup.extend([
-        step("В FL Studio: Options → MIDI settings. В списке Input выбери «loopMIDI Port» и включи Enable."),
+        step(&format!("В FL Studio: Options → MIDI settings. В списке Input выбери «{PORT}» и включи Enable.")),
         step("Выбери канал с инструментом в Channel Rack — играй. В FL средняя «до» называется C5: это та же нота, что C4 здесь."),
         learn_step("Play: правый клик по кнопке Play → Link to controller… → нажми Back.", button(Button::Back)),
         learn_step("Record: правый клик по Record → Link to controller… → нажми Start.", button(Button::Start)),
@@ -335,7 +343,7 @@ pub fn ableton_drums() -> Profile {
     ]);
     let mut setup = loopmidi_steps();
     setup.extend([
-        step("В Ableton: Options → Preferences → Link, Tempo & MIDI. У входа «loopMIDI Port» включи Track и Remote."),
+        step(&format!("В Ableton: Options → Preferences → Link, Tempo & MIDI. У входа «{PORT}» включи Track и Remote.")),
         step("Положи на MIDI-трек Drum Rack с китом и включи запись трека (Arm). Нижний ряд пэдов — крестовина, второй — кнопки, дальше плечи, LT и нажатия стиков."),
         learn_step("Play: Ctrl+M, клик по Play, нажми Back.", button(Button::Back)),
         learn_step("Record: в том же режиме клик по Record, нажми Start.", button(Button::Start)),
@@ -360,7 +368,7 @@ pub fn ableton_drums() -> Profile {
 fn synth_setup() -> Vec<SetupStep> {
     let mut setup = loopmidi_steps();
     setup.extend([
-        step("В DAW выбери вход «loopMIDI Port» на треке с синтезатором и включи у трека запись/мониторинг."),
+        step(&format!("В DAW выбери вход «{PORT}» на треке с синтезатором и включи у трека запись/мониторинг.")),
         step("Подтяжка, Mod Wheel (CC1) и Aftertouch работают сами, если их использует пресет. Диапазон подтяжки в синте должен совпадать с профилем (здесь ±2 полутона)."),
         learn_step("Ручки синта: правый клик по ручке → MIDI Learn (в Vital — «Learn MIDI Assignment»), затем наклони правый стик вверх-вниз…", Input::Axis { axis: Axis::RightY }),
         learn_step("…вторая ручка — левый стик влево-вправо…", Input::Axis { axis: Axis::LeftX }),
@@ -520,7 +528,7 @@ pub fn daw_control() -> Profile {
     ]);
     let mut setup = loopmidi_steps();
     setup.extend([
-        step("В DAW включи у входа «loopMIDI Port» управление (в Ableton — Remote, в FL — «Generic controller»). Дальше каждую кнопку привязываем через MIDI Learn: в Ableton — Ctrl+M, кликнуть элемент, нажать кнопку геймпада."),
+        step(&format!("В DAW включи у входа «{PORT}» управление (в Ableton — Remote, в FL — «Generic controller»). Дальше каждую кнопку привязываем через MIDI Learn: в Ableton — Ctrl+M, кликнуть элемент, нажать кнопку геймпада.")),
         learn_step("Play — Back.", button(Button::Back)),
         learn_step("Record — Start.", button(Button::Start)),
         learn_step("Stop — A (Cross).", button(Button::South)),

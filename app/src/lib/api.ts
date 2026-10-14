@@ -10,6 +10,12 @@ export function demoOption(name: string): string | null {
   return inApp || typeof location === "undefined" ? null : new URLSearchParams(location.search).get(name);
 }
 
+/** Программа запущена на macOS (в демо — ?mac). */
+export const isMac =
+  typeof navigator !== "undefined" && (/Mac/.test(navigator.userAgent) || (!inApp && demoOption("mac") !== null));
+/** Клавиша-модификатор для подсказок: ⌘ на Mac, Ctrl+ на Windows. */
+export const MOD = isMac ? "⌘" : "Ctrl+";
+
 async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   if (inApp) return tauriInvoke<T>(cmd, args);
   const { demo } = await import("./demo");
