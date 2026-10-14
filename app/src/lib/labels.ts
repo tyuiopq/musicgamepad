@@ -1,5 +1,5 @@
 // Подписи кнопок и нот для интерфейса.
-import type { PadFamily, SwitchKey } from "./api";
+import type { Input, PadFamily, SwitchKey } from "./api";
 
 type Labels = Record<string, string>;
 
@@ -81,6 +81,21 @@ const axisNames: Record<string, [string, string]> = {
   right_x: ["П.стик →", "П.стик ←"],
   right_y: ["П.стик ↑", "П.стик ↓"],
 };
+
+const AXIS_NAMES: Record<string, string> = {
+  left_x: "Левый стик ↔",
+  left_y: "Левый стик ↕",
+  right_x: "Правый стик ↔",
+  right_y: "Правый стик ↕",
+};
+
+/** Подпись любого входа: кнопка, курок или направление стика. */
+export function inputName(input: Input, family: PadFamily): string {
+  if (input.kind === "button") return keyLabel({ kind: "button", button: input.button }, family);
+  if (input.kind === "axis_switch") return keyLabel({ kind: "axis_switch", axis: input.axis, direction: input.direction }, family);
+  if (input.axis.endsWith("trigger")) return keyLabel({ kind: "axis_switch", axis: input.axis, direction: "positive" }, family);
+  return AXIS_NAMES[input.axis] ?? input.axis;
+}
 
 export function keyLabel(key: SwitchKey, family: PadFamily): string {
   const labels = byFamily[family];

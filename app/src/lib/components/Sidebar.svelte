@@ -14,6 +14,7 @@
     onview,
     editorDirty,
     onlibrary,
+    onhelp,
   }: {
     status: Status;
     profiles: ProfileEntry[];
@@ -22,6 +23,7 @@
     onview: (v: View) => void;
     editorDirty: boolean;
     onlibrary: () => void;
+    onhelp: () => void;
   } = $props();
 
   const NAV: [View, string, "play" | "profile" | "records" | "settings"][] = [
@@ -57,7 +59,10 @@
 </script>
 
 <nav class="sidebar" aria-label="Разделы">
-  <div class="brand">MusicGamepad</div>
+  <div class="brand">
+    <span>MusicGamepad</span>
+    <button type="button" class="help" title="Подсказка (F1)" aria-label="Подсказка" onclick={onhelp}>?</button>
+  </div>
 
   <div class="nav">
     {#each NAV as [id, label, icon] (id)}
@@ -157,7 +162,25 @@
     gap: 14px;
     overflow-y: auto;
   }
+  .help {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 1px solid var(--line-strong);
+    background: transparent;
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 700;
+    padding: 0;
+  }
+  .help:hover {
+    color: var(--text);
+    border-color: var(--accent);
+  }
   .brand {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     padding: 0 6px;
     font-family: var(--font-display);
     font-weight: 700;

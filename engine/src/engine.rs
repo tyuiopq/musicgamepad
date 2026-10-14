@@ -105,6 +105,8 @@ pub struct UiSettings {
     pub accent: Option<String>,
     /// Второй акцент (модификаторы, слои).
     pub secondary: Option<String>,
+    /// Знакомство с программой пройдено (или пропущено).
+    pub onboarded: bool,
 }
 
 impl Default for Settings {

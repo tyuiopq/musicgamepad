@@ -2,6 +2,8 @@
   import { onMount } from "svelte";
   import { api, demoOption, type PadFamily, type Profile, type ProfileEntry, type Status } from "$lib/api";
   import Editor from "$lib/components/editor/Editor.svelte";
+  import Help from "$lib/components/Help.svelte";
+  import Onboarding from "$lib/components/Onboarding.svelte";
   import Library from "$lib/components/Library.svelte";
   import Play from "$lib/components/Play.svelte";
   import Recordings from "$lib/components/Recordings.svelte";
@@ -19,6 +21,8 @@
   let editorDirty = $state(false);
   let libraryOpen = $state(demoOption("library") !== null);
   let theme = $state<Theme>(DEFAULT_THEME);
+  let helpOpen = $state(demoOption("help") !== null);
+  let welcome = $state(false);
 
   const activePad = $derived(status?.pads.find((p) => p.id === status?.active_pad) ?? null);
   const family = $derived<PadFamily>(activePad?.family ?? "xbox");
@@ -53,6 +57,7 @@
     api.status().then((s) => (status ??= s));
     refreshProfiles();
     api.settings().then((s) => {
+      welcome = !s.ui?.onboarded;
       theme = validTheme({ accent: s.ui?.accent ?? undefined, secondary: s.ui?.secondary ?? undefined });
       applyTheme(theme);
     });
@@ -64,11 +69,44 @@
   });
 </script>
 
+<svelte:window
+  onkeydown={(e) => {
+    if (e.key === "F1") {
+      e.preventDefault();
+      helpOpen = !helpOpen;
+    }
+  }}
+/>
+
 {#if !status}
   <p class="loading muted">Запускаю движок…</p>
 {:else}
   <div class="app">
-    <Sidebar {status} {profiles} {run} {view} onview={(v) => (view = v)} {editorDirty} onlibrary={() => (libraryOpen = true)} />
+    <Sidebar
+      {status}
+      {profiles}
+      {run}
+      {view}
+      onview={(v) => (view = v)}
+      {editorDirty}
+      onlibrary={() => (libraryOpen = true)}
+      onhelp={() => (helpOpen = true)}
+    />
+    {#if helpOpen}
+      <Help
+        {status}
+        {profile}
+        {family}
+        onclose={() => (helpOpen = false)}
+        onwelcome={() => {
+          helpOpen = false;
+          welcome = true;
+        }}
+      />
+    {/if}
+    {#if welcome}
+      <Onboarding {status} {family} {run} onclose={() => (welcome = false)} />
+    {/if}
     {#if libraryOpen}
       <Library {profiles} current={status.profile} onclose={() => (libraryOpen = false)} onprofiles={refreshProfiles} {run} />
     {/if}

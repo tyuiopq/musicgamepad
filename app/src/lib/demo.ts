@@ -111,7 +111,7 @@ export const demo: Record<string, (args?: Record<string, unknown>) => unknown> =
   list_profiles: (): ProfileEntry[] => scene.library,
   get_settings: () => ({
     pad_profiles: { play_station: "Импровизация: пентатоника" },
-    ui: { accent: new URLSearchParams(location.search).get("accent"), secondary: null },
+    ui: { accent: new URLSearchParams(location.search).get("accent"), secondary: null, onboarded: !new URLSearchParams(location.search).has("welcome") },
   }),
   list_midi_ports: () => ["loopMIDI Port", "Microsoft GS Wavetable Synth"],
   list_midi_in_ports: () => ["loopMIDI Port", "Arturia KeyStep"],

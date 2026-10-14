@@ -1,6 +1,6 @@
 // Проверка раскладки: то, что скорее всего работает не так, как задумано.
-import type { Binding, Input, PadFamily, Profile } from "./api";
-import { keyLabel } from "./labels";
+import type { Binding, PadFamily, Profile } from "./api";
+import { inputName } from "./labels";
 import { DRUM_CHANNEL } from "./sound";
 
 export interface Issue {
@@ -8,20 +8,6 @@ export interface Issue {
   text: string;
   /** Слой, к которому относится замечание (чтобы перейти к нему). */
   layer?: string;
-}
-
-const AXIS_NAMES: Record<string, string> = {
-  left_x: "Левый стик ↔",
-  left_y: "Левый стик ↕",
-  right_x: "Правый стик ↔",
-  right_y: "Правый стик ↕",
-};
-
-function inputName(input: Input, family: PadFamily): string {
-  if (input.kind === "button") return keyLabel({ kind: "button", button: input.button }, family);
-  if (input.kind === "axis_switch") return keyLabel({ kind: "axis_switch", axis: input.axis, direction: input.direction }, family);
-  if (input.axis.endsWith("trigger")) return keyLabel({ kind: "axis_switch", axis: input.axis, direction: "positive" }, family);
-  return AXIS_NAMES[input.axis] ?? input.axis;
 }
 
 /** Какой (канал, CC) задаёт назначение — для поиска «спорящих» за один CC. */

@@ -4,6 +4,7 @@
   import { demoOption, type PadFamily, type Profile, type Status } from "$lib/api";
   import { effectLabel } from "$lib/describe";
   import { keyLabel, noteName, solfege } from "$lib/labels";
+  import BankSetup from "./BankSetup.svelte";
   import Gamepad from "./Gamepad.svelte";
   import Monitor from "./Monitor.svelte";
   import PianoRoll from "./PianoRoll.svelte";
@@ -44,6 +45,11 @@
 </script>
 
 <div class="play">
+  {#if status.synth.enabled && !status.synth.soundfont}
+    <section class="card">
+      <BankSetup {status} {run} />
+    </section>
+  {/if}
   <header class="nowbar">
     <div class="now" aria-live="polite">
       {#if shown.length === 0}

@@ -1,6 +1,7 @@
 //! Оболочка Tauri: команды для интерфейса, настройки и профили на диске.
 
 mod applog;
+mod bank;
 mod profiles;
 mod safefile;
 
@@ -31,6 +32,8 @@ struct AppState {
     profiles: ProfileStore,
     settings_path: PathBuf,
     recordings: PathBuf,
+    /// Отмена скачивания звукового банка.
+    bank_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 type CmdResult<T> = Result<T, String>;
@@ -266,6 +269,53 @@ async fn choose_soundfont(app: AppHandle) -> Option<String> {
     state.update_settings(|s| s.soundfont = Some(path.clone()));
     state.engine.send(Command::SetSoundFont(Some(path.clone())));
     Some(path.display().to_string())
+}
+
+#[derive(Clone, Serialize)]
+struct BankProgress {
+    done: u64,
+    total: Option<u64>,
+}
+
+/// Скачать звуковой банк по умолчанию (GeneralUser GS) в папку звуков и включить его.
+/// Ход скачивания — событием `bank_progress`.
+#[tauri::command]
+async fn download_bank(app: AppHandle) -> CmdResult<String> {
+    let state = app.state::<AppState>();
+    let dir = state.library.clone();
+    let cancel = state.bank_cancel.clone();
+    cancel.store(false, std::sync::atomic::Ordering::Relaxed);
+    let emitter = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        bank::download(&dir, &cancel, |done, total| {
+            let _ = emitter.emit("bank_progress", BankProgress { done, total });
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    match result {
+        Ok(path) => {
+            applog::write("INFO", &format!("звуковой банк скачан: {}", path.display()));
+            state.update_settings(|s| s.soundfont = None);
+            state.engine.send(Command::SetSoundFont(None));
+            Ok(path.display().to_string())
+        }
+        Err(e) => {
+            applog::write("ERROR", &format!("скачивание банка: {e}"));
+            Err(e)
+        }
+    }
+}
+
+#[tauri::command]
+fn cancel_bank_download(state: State<AppState>) {
+    state.bank_cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Знакомство пройдено (false — показать снова).
+#[tauri::command]
+fn set_onboarded(state: State<AppState>, done: bool) {
+    state.update_settings(|s| s.ui.onboarded = done);
 }
 
 /// Вернуться к банку по умолчанию.
@@ -702,6 +752,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         profiles,
         settings_path,
         recordings,
+        bank_cancel: Default::default(),
     });
     app.state::<AppState>().push_guests();
     Ok(())
@@ -727,6 +778,9 @@ pub fn run() {
             set_master_volume,
             choose_soundfont,
             reset_soundfont,
+            download_bank,
+            cancel_bank_download,
+            set_onboarded,
             audition,
             list_profiles,
             get_profile,

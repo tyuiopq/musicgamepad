@@ -78,6 +78,8 @@ impl SoundBank {
         if let Some(exe_dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf)) {
             dirs.push(exe_dir.join("sounds"));
         }
+        // Банк из папки проекта — только в отладочной сборке: релиз ведёт себя как у друзей
+        #[cfg(debug_assertions)]
         if let Some(repo) = Path::new(env!("CARGO_MANIFEST_DIR")).parent() {
             dirs.push(repo.join("assets"));
         }

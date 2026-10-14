@@ -316,7 +316,7 @@ export interface AppSettings {
   pad_assign?: Record<string, string>;
   pad_profiles: Record<string, string>;
   calibration?: Record<string, Calibration>;
-  ui?: { accent: string | null; secondary: string | null };
+  ui?: { accent: string | null; secondary: string | null; onboarded?: boolean };
 }
 
 export interface Touched {
@@ -415,6 +415,13 @@ export const api = {
   setAudioMode: (mode: AudioMode) => invoke<void>("set_audio_mode", { mode }),
   setMasterVolume: (volume: number) => invoke<void>("set_master_volume", { volume }),
   chooseSoundfont: () => invoke<string | null>("choose_soundfont"),
+  downloadBank: () => invoke<string>("download_bank"),
+  cancelBankDownload: () => invoke<void>("cancel_bank_download"),
+  setOnboarded: (done: boolean) => invoke<void>("set_onboarded", { done }),
+  onBankProgress: async (cb: (p: { done: number; total: number | null }) => void): Promise<UnlistenFn> => {
+    if (inApp) return listen<{ done: number; total: number | null }>("bank_progress", (e) => cb(e.payload));
+    return () => {};
+  },
   resetSoundfont: () => invoke<void>("reset_soundfont"),
   presets: () => invoke<PresetInfo[]>("get_presets"),
   presetsFor: (file: string | null) => invoke<PresetInfo[]>("get_presets_for", { file }),
