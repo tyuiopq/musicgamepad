@@ -238,6 +238,9 @@ pub struct Synth {
 impl Synth {
     /// Запускает вывод в режиме `mode`. Если эксклюзивный не удался — откатывается на общий.
     pub fn start(bank: &SoundBank, mode: AudioMode, gain: f32) -> anyhow::Result<Self> {
+        // Эксклюзивный режим есть только на Windows; на других системах всегда общий
+        #[cfg(not(windows))]
+        let _ = mode;
         #[cfg(windows)]
         if mode == AudioMode::Exclusive {
             match Self::start_exclusive(bank, gain) {
