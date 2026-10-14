@@ -1,14 +1,15 @@
 <script lang="ts">
+  // Боковая панель: разделы, что подключено и куда идёт звук, запись и «Тишина».
   import { api, type ProfileEntry, type Status } from "$lib/api";
-  import { musicName } from "$lib/describe";
   import { familyName } from "$lib/labels";
+  import Icon from "./Icon.svelte";
+
+  type View = "play" | "edit" | "records" | "settings";
 
   let {
     status,
     profiles,
-    ports,
     run,
-    refreshPorts,
     view,
     onview,
     editorDirty,
@@ -16,443 +17,224 @@
   }: {
     status: Status;
     profiles: ProfileEntry[];
-    ports: string[];
     run: (action: () => Promise<unknown>) => void;
-    refreshPorts: () => Promise<void>;
-    view: "play" | "edit" | "records";
-    onview: (v: "play" | "edit" | "records") => void;
+    view: View;
+    onview: (v: View) => void;
     editorDirty: boolean;
     onlibrary: () => void;
   } = $props();
 
-  // Профиль для семейства активного геймпада (xbox, play_station…)
-  let padProfiles = $state<Record<string, string>>({});
-  $effect(() => {
-    api.settings().then((s) => (padProfiles = s.pad_profiles ?? {}));
-  });
-  const activeFamily = $derived(status.pads.find((p) => p.id === status.active_pad)?.family ?? null);
+  const NAV: [View, string, "play" | "profile" | "records" | "settings"][] = [
+    ["play", "Игра", "play"],
+    ["edit", "Профиль", "profile"],
+    ["records", "Записи", "records"],
+    ["settings", "Настройки", "settings"],
+  ];
 
-  async function setPadProfile(family: string, name: string) {
-    await api.setPadProfile(family, name || null);
-    padProfiles = (await api.settings()).pad_profiles ?? {};
+  const activePad = $derived(status.pads.find((p) => p.id === status.active_pad) ?? null);
+  const padValue = $derived(status.pad_choice.mode === "auto" ? "__auto" : status.pad_choice.name);
+
+  function time(sec: number): string {
+    return `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, "0")}`;
   }
+  const t = $derived(status.transport);
+  const recLabel = $derived(
+    t.record === "count_in" ? `Отсчёт · ${t.count_in_left ?? ""}` : t.record === "recording" ? `Стоп · ${time(t.record_seconds)}` : "Запись",
+  );
 
-  const auto = $derived(status.pad_choice.mode === "auto");
-  const fixedName = $derived(status.pad_choice.mode === "fixed" ? status.pad_choice.name : null);
-  const fixedMissing = $derived(fixedName !== null && !status.pads.some((p) => p.name === fixedName));
-  const fileName = (path: string | null) => path?.split(/[\\/]/).pop() ?? null;
-
-  const latency = $derived(status.synth.latency);
-  const latencyTitle = $derived(
-    latency
-      ? [
-          latency.input !== null ? `ввод ${latency.input.toFixed(1)} мс` : "ввод — нажми кнопку",
-          `ожидание блока ${latency.block.toFixed(1)} мс`,
-          `вывод ${latency.output.toFixed(1)} мс`,
-          "без времени передачи самого геймпада",
-        ].join(" · ")
-      : "",
+  const soundText = $derived(
+    !status.synth.enabled
+      ? "выключен"
+      : status.synth.error
+        ? "ошибка"
+        : status.synth.latency
+          ? `≈ ${Math.round(status.synth.latency.total)} мс`
+          : "включён",
   );
 </script>
 
-<nav>
-  <div class="logo">MusicGamepad</div>
+<nav class="sidebar" aria-label="Разделы">
+  <div class="brand">MusicGamepad</div>
 
-  <div class="views" role="tablist" aria-label="Экран">
-    <button type="button" role="tab" aria-selected={view === "play"} class:on={view === "play"} onclick={() => onview("play")}>
-      Игра
-    </button>
-    <button type="button" role="tab" aria-selected={view === "edit"} class:on={view === "edit"} onclick={() => onview("edit")}>
-      Профиль{#if editorDirty}<span class="dirty" title="Есть несохранённые изменения">•</span>{/if}
-    </button>
-    <button type="button" role="tab" aria-selected={view === "records"} class:on={view === "records"} onclick={() => onview("records")}>
-      Записи
-    </button>
+  <div class="nav">
+    {#each NAV as [id, label, icon] (id)}
+      <button type="button" class:on={view === id} aria-current={view === id ? "page" : undefined} onclick={() => onview(id)}>
+        <Icon name={icon} />
+        <span>{label}</span>
+        {#if id === "edit" && editorDirty}<span class="badge" title="Есть несохранённые изменения"></span>{/if}
+      </button>
+    {/each}
   </div>
 
-  <section>
-    <div class="section-title">Геймпад</div>
-    {#each status.pads as pad (pad.id)}
-      {@const active = pad.id === status.active_pad}
-      <button
-        class="pad"
-        class:active
-        aria-pressed={active}
-        onclick={() => run(() => api.setPadChoice({ mode: "fixed", name: pad.name }))}
-        title="{familyName[pad.family]} · {pad.model}"
-      >
-        <span class="led"></span>
-        <span class="name">{pad.name}</span>
-      </button>
-    {:else}
-      <p class="muted small">Подключи геймпад — он появится здесь.</p>
-    {/each}
-    {#if fixedMissing}
-      <p class="muted small">«{fixedName}» не подключён.</p>
-    {/if}
-    {#if status.pads.length > 0}
-      <label class="check">
-        <input
-          type="checkbox"
-          checked={auto}
-          onchange={(e) =>
-            run(() =>
-              api.setPadChoice(
-                e.currentTarget.checked
-                  ? { mode: "auto" }
-                  : { mode: "fixed", name: status.pads.find((p) => p.id === status.active_pad)?.name ?? status.pads[0].name },
-              ),
-            )}
-        />
-        Играет тот, где нажали
-      </label>
-    {/if}
-    {#if activeFamily}
-      <label class="pad-profile" title="Этот профиль будет включаться сам, когда играешь таким геймпадом">
-        <span class="muted">Профиль для {familyName[activeFamily]}</span>
-        <select value={padProfiles[activeFamily] ?? ""} onchange={(e) => run(() => setPadProfile(activeFamily, e.currentTarget.value))}>
-          <option value="">не менять</option>
-          {#each profiles as p (p.name)}<option value={p.name}>{p.name}</option>{/each}
-        </select>
-      </label>
-    {/if}
-    {#if status.input_error}<p class="error">{status.input_error}</p>{/if}
-  </section>
-
-  <section>
-    <div class="section-title">Профиль</div>
-    <select
-      value={status.profile}
-      disabled={editorDirty}
-      title={editorDirty ? "Сначала сохрани или отмени правки профиля" : ""}
-      onchange={(e) => run(() => api.selectProfile(e.currentTarget.value))}
-    >
-      {#each profiles as p (p.name)}
-        <option value={p.name}>{p.name}{p.modified ? " (изменён)" : ""}</option>
-      {/each}
-    </select>
-    <button type="button" class="library" onclick={onlibrary}>Библиотека профилей…</button>
-    {#if status.music}
-      <div class="fact"><span class="muted">Лад</span><span>{musicName(status.music)}</span></div>
-    {/if}
-  </section>
-
-  <section>
-    <div class="section-title">Звук</div>
-    <label class="check">
-      <input
-        type="checkbox"
-        checked={status.synth.enabled}
-        onchange={(e) => run(() => api.setSynthEnabled(e.currentTarget.checked))}
-      />
-      Встроенный синтезатор
-    </label>
-    {#if status.synth.error}<p class="error">{status.synth.error}</p>{/if}
-    {#if status.synth.enabled}
-      <label class="check" title="Эксклюзивный режим Windows: звук идёт напрямую в устройство">
-        <input
-          type="checkbox"
-          checked={status.synth.requested_mode === "exclusive"}
-          onchange={(e) => run(() => api.setAudioMode(e.currentTarget.checked ? "exclusive" : "shared"))}
-        />
-        Низкая задержка
-      </label>
-      {#if status.synth.fallback}
-        <p class="error">Не включилась: {status.synth.fallback}. Играю в обычном режиме.</p>
-      {:else if status.synth.mode === "exclusive"}
-        <p class="muted small">Другие программы на «{status.synth.device}» сейчас не звучат.</p>
-      {/if}
-      {#if latency}
-        <p class="latency" title={latencyTitle}>
-          Задержка ≈ <b class:good={latency.total < 15} class:bad={latency.total >= 25}>{Math.round(latency.total)} мс</b>
-        </p>
-      {/if}
-    {/if}
-    <div class="row">
+  <section class="block">
+    <div class="card-title">Геймпад</div>
+    <div class="pad">
+      <span class="led" class:on={!!activePad}></span>
+      <div class="stack" style="--gap: 0">
+        <span class="ellipsis">{activePad?.name ?? "не подключён"}</span>
+        {#if activePad}<span class="xs muted">{familyName[activePad.family]}</span>{/if}
+      </div>
+    </div>
+    {#if status.pads.length > 1}
       <select
-        aria-label="MIDI-выход"
-        value={status.midi.port ?? ""}
-        onchange={(e) => run(() => api.setMidiOut(e.currentTarget.value || null))}
+        class="select select-sm"
+        aria-label="Каким геймпадом играть"
+        value={padValue}
+        onchange={(e) =>
+          run(() =>
+            api.setPadChoice(e.currentTarget.value === "__auto" ? { mode: "auto" } : { mode: "fixed", name: e.currentTarget.value }),
+          )}
       >
-        <option value="">MIDI-выход: нет</option>
-        {#each ports as p (p)}<option value={p}>{p}</option>{/each}
+        <option value="__auto">Тот, где нажали</option>
+        {#each status.pads as p (p.id)}<option value={p.name}>{p.name}</option>{/each}
       </select>
-      <button class="icon" aria-label="Обновить список MIDI-портов" onclick={() => run(refreshPorts)}>↻</button>
-    </div>
-    {#if status.midi.error}<p class="error">{status.midi.error}</p>{/if}
-    {#if status.synth.enabled}
-      <label class="volume">
-        <span class="muted">Громкость</span>
-        <input
-          type="range"
-          min="0"
-          max="2"
-          step="0.05"
-          value={status.synth.master_volume}
-          oninput={(e) => run(() => api.setMasterVolume(Number(e.currentTarget.value)))}
-        />
-        <b>{Math.round(status.synth.master_volume * 100)}%</b>
-      </label>
     {/if}
-    <div class="bank">
-      <span class="muted small" title={status.synth.soundfont ?? ""}>
-        Банк: {fileName(status.synth.soundfont) ?? "не найден"}
-      </span>
-      <button type="button" class="link small" onclick={() => run(api.chooseSoundfont)}>Сменить…</button>
-      {#if status.synth.custom_soundfont}
-        <button type="button" class="link small" onclick={() => run(api.resetSoundfont)}>По умолчанию</button>
-      {/if}
-      <button type="button" class="link small" onclick={() => run(api.openSoundLibrary)} title="Свои .sf2 и сэмплы">Папка библиотеки</button>
+  </section>
+
+  <section class="block">
+    <div class="card-title">Профиль</div>
+    <div class="row" style="--gap: 6px">
+      <select
+        class="select select-sm"
+        style="flex: 1"
+        aria-label="Профиль"
+        value={status.profile}
+        disabled={editorDirty}
+        title={editorDirty ? "Сначала сохрани или отмени правки профиля" : ""}
+        onchange={(e) => run(() => api.selectProfile(e.currentTarget.value))}
+      >
+        {#each profiles as p (p.name)}<option value={p.name}>{p.name}</option>{/each}
+      </select>
+      <button type="button" class="btn btn-sm btn-icon" style="width: 30px" title="Библиотека профилей" aria-label="Библиотека профилей" onclick={onlibrary}>
+        <Icon name="library" size={16} />
+      </button>
     </div>
   </section>
+
+  <button type="button" class="block out" onclick={() => onview("settings")} title="Звук и MIDI — в «Настройках»">
+    <span class="card-title">Выход</span>
+    <span class="kv"><span class="muted">Звук</span><span class:warn={!!status.synth.error}>{soundText}</span></span>
+    <span class="kv"><span class="muted">MIDI</span><span class="ellipsis" class:warn={!!status.midi.error}>{status.midi.port ?? "нет"}</span></span>
+  </button>
 
   <div class="spacer"></div>
 
-  {#if status.last_recording && !status.recording}
-    <button class="link small" onclick={() => run(api.openRecordings)} title={status.last_recording}>
-      Сохранено: {fileName(status.last_recording)}
+  <div class="actions">
+    <button type="button" class="btn btn-rec btn-lg btn-block" class:on={t.record !== "idle"} onclick={() => run(api.toggleRecord)}>
+      <span class="dot"></span>{recLabel}
     </button>
-  {/if}
-  <button class="rec" class:on={status.transport.record !== "idle"} onclick={() => run(api.toggleRecord)}>
-    <span class="dot"></span>{status.transport.record === "count_in"
-      ? `Отсчёт… ${status.transport.count_in_left ?? ""}`
-      : status.recording
-        ? "Остановить запись"
-        : "Запись"}
-  </button>
+    <button type="button" class="btn btn-ghost btn-block" title="Заглушить все ноты (All Notes Off)" onclick={() => run(api.panic)}>
+      Тишина
+    </button>
+  </div>
 </nav>
 
 <style>
-  nav {
-    width: 260px;
+  .sidebar {
+    position: sticky;
+    top: 0;
+    width: 232px;
+    height: 100vh;
     flex-shrink: 0;
     box-sizing: border-box;
-    min-height: 100vh;
-    padding: 22px 18px;
-    background: var(--panel);
+    padding: 18px 14px;
+    background: var(--surface-1);
     border-right: 1px solid var(--line);
     display: flex;
     flex-direction: column;
-    gap: 24px;
+    gap: 14px;
+    overflow-y: auto;
   }
-  .pad-profile {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    font-size: 13px;
-  }
-  .library {
-    min-height: 36px;
-    border-radius: 10px;
-    border: 1px dashed var(--line-strong);
-    background: transparent;
-    color: var(--mod);
-  }
-  .library:hover {
-    border-color: var(--mod);
-  }
-  .views {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 4px;
-    padding: 4px;
-    border-radius: 12px;
-    background: var(--bg);
-    margin-top: -8px;
-  }
-  .views button {
-    min-height: 36px;
-    padding: 0 2px;
-    font-size: 14px;
-    border: none;
-    border-radius: 8px;
-    background: transparent;
-    color: var(--muted);
-  }
-  .views button.on {
-    background: var(--key);
-    color: var(--text);
-  }
-  .views .dirty {
-    color: var(--accent);
-    margin-left: 4px;
-  }
-  .logo {
+  .brand {
+    padding: 0 6px;
     font-family: var(--font-display);
     font-weight: 700;
-    font-size: 17px;
+    font-size: 16px;
   }
-  section {
+  .nav {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .nav button {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 38px;
+    padding: 0 10px;
+    border: none;
+    border-radius: var(--r-sm);
+    background: transparent;
+    color: var(--muted);
+    text-align: left;
+    font-size: 14px;
+  }
+  .nav button:hover {
+    color: var(--text);
+    background: var(--surface-2);
+  }
+  .nav button.on {
+    color: var(--text);
+    background: var(--surface-3);
+  }
+  .nav button.on :global(svg) {
+    color: var(--accent);
+  }
+  .badge {
+    width: 7px;
+    height: 7px;
+    margin-left: auto;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+  .block {
     display: flex;
     flex-direction: column;
     gap: 8px;
+    padding: 12px;
+    border-radius: var(--r-md);
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    min-width: 0;
   }
   .pad {
     display: flex;
     align-items: center;
     gap: 10px;
-    min-height: 44px;
-    padding: 0 12px;
-    border-radius: 10px;
-    border: 1px solid var(--line-strong);
-    background: transparent;
-    color: var(--muted);
-    text-align: left;
+    min-width: 0;
   }
-  .pad .name {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .pad .led {
+  .led {
     width: 8px;
     height: 8px;
     flex-shrink: 0;
     border-radius: 50%;
-    border: 1px solid var(--muted);
-    box-sizing: border-box;
+    background: var(--line-strong);
   }
-  .pad.active {
-    border-color: var(--accent);
-    background: var(--accent-soft);
+  .led.on {
+    background: var(--ok);
+  }
+  .out {
+    text-align: left;
     color: var(--text);
-  }
-  .pad.active .led {
-    background: var(--accent);
-    border-color: var(--accent);
-  }
-  .check {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--muted);
-    font-size: 14px;
-    cursor: pointer;
-  }
-  select {
-    min-height: 40px;
-    padding: 0 10px;
-    border-radius: 10px;
-    border: 1px solid var(--line-strong);
-    background: var(--raised);
-    min-width: 0;
-  }
-  .row {
-    display: flex;
-    gap: 6px;
-  }
-  .row select {
-    flex: 1;
-  }
-  .icon {
-    width: 40px;
-    border-radius: 10px;
-    border: 1px solid var(--line-strong);
-    background: var(--raised);
-  }
-  .fact {
-    display: flex;
-    justify-content: space-between;
-    gap: 8px;
-    font-size: 14px;
-  }
-  .small {
     font-size: 13px;
-    margin: 0;
   }
-  .spacer {
-    flex: 1;
+  .out:hover {
+    border-color: var(--line-strong);
   }
-  .volume {
+  .kv {
     display: grid;
-    grid-template-columns: auto 1fr 44px;
-    align-items: center;
+    grid-template-columns: 48px minmax(0, 1fr);
     gap: 8px;
-    font-size: 14px;
   }
-  .volume input {
-    accent-color: var(--accent);
-    min-width: 0;
-  }
-  .volume b {
+  .kv > :last-child {
     text-align: right;
-    font-weight: 600;
   }
-  .bank {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 4px 10px;
-  }
-  .bank span {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 100%;
-  }
-  .bank .link {
-    color: var(--mod);
-  }
-  .latency {
-    margin: 0;
-    font-size: 14px;
-    color: var(--muted);
-  }
-  .latency b {
-    color: var(--text);
-  }
-  .latency b.good {
-    color: var(--face-a);
-  }
-  .latency b.bad {
+  .warn {
     color: var(--error);
   }
-  .link {
-    background: none;
-    border: none;
-    color: var(--muted);
-    text-align: left;
-    padding: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .link:hover {
-    color: var(--text);
-  }
-  .rec {
+  .actions {
     display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    min-height: 48px;
-    border-radius: 12px;
-    border: 1px solid var(--rec);
-    background: transparent;
-    color: var(--rec-text);
-    font-weight: 600;
-  }
-  .rec .dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background: var(--rec);
-  }
-  .rec.on {
-    background: var(--rec);
-    color: #fff;
-  }
-  .rec.on .dot {
-    background: #fff;
-    animation: blink 1s infinite;
-  }
-  @keyframes blink {
-    50% {
-      opacity: 0.3;
-    }
-  }
-  button:hover,
-  select:hover {
-    border-color: var(--accent);
+    flex-direction: column;
+    gap: 8px;
   }
 </style>

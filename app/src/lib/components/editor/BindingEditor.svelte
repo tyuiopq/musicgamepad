@@ -586,7 +586,7 @@
     <div class="learn">
       <button type="button" class="ghost" onclick={() => api.sendTest(learnMessages())}>Отправить для MIDI Learn</button>
       <span class="hint">
-        {midiPort ? `В DAW включи режим обучения, выбери параметр и нажми — уйдёт ровно это сообщение в «${midiPort}».` : "Сначала выбери MIDI-выход в боковой панели."}
+        {midiPort ? `В DAW включи режим обучения, выбери параметр и нажми — уйдёт ровно это сообщение в «${midiPort}».` : "Сначала выбери MIDI-выход в «Настройках»."}
       </span>
     </div>
   {/if}

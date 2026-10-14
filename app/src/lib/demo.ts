@@ -109,7 +109,10 @@ export const demo: Record<string, (args?: Record<string, unknown>) => unknown> =
   get_status: () => structuredClone(status),
   get_profile: () => profile,
   list_profiles: (): ProfileEntry[] => scene.library,
-  get_settings: () => ({ pad_profiles: { play_station: "Импровизация: пентатоника" } }),
+  get_settings: () => ({
+    pad_profiles: { play_station: "Импровизация: пентатоника" },
+    ui: { accent: new URLSearchParams(location.search).get("accent"), secondary: null },
+  }),
   list_midi_ports: () => ["loopMIDI Port", "Microsoft GS Wavetable Synth"],
   preview_profile: (args) => (args?.layer === "chords" ? scene.chords : scene.controls),
   apply_profile: () => undefined,

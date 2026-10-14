@@ -255,6 +255,7 @@ export interface Profile {
 
 export interface AppSettings {
   pad_profiles: Record<string, string>;
+  ui?: { accent: string | null; secondary: string | null };
 }
 
 export interface Touched {
@@ -339,6 +340,7 @@ export const api = {
   importProfile: () => invoke<string | null>("import_profile"),
   settings: () => invoke<AppSettings>("get_settings"),
   setPadProfile: (family: string, profile: string | null) => invoke<void>("set_pad_profile", { family, profile }),
+  setUiColors: (accent: string, secondary: string) => invoke<void>("set_ui_colors", { accent, secondary }),
   setPadChoice: (choice: PadChoice) => invoke<void>("set_pad_choice", { choice }),
   setSynthEnabled: (enabled: boolean) => invoke<void>("set_synth_enabled", { enabled }),
   setAudioMode: (mode: AudioMode) => invoke<void>("set_audio_mode", { mode }),

@@ -167,6 +167,20 @@ fn open_sound_library(app: AppHandle, state: State<AppState>) -> CmdResult<()> {
     app.opener().open_path(state.library.to_string_lossy(), None::<&str>).map_err(|e| e.to_string())
 }
 
+/// Акцентные цвета интерфейса.
+#[tauri::command]
+fn set_ui_colors(state: State<AppState>, accent: String, secondary: String) -> CmdResult<()> {
+    let ok = |c: &str| c.len() == 7 && c.starts_with('#') && c[1..].chars().all(|x| x.is_ascii_hexdigit());
+    if !ok(&accent) || !ok(&secondary) {
+        return Err("цвет должен быть в виде #rrggbb".into());
+    }
+    state.update_settings(|s| {
+        s.ui.accent = Some(accent);
+        s.ui.secondary = Some(secondary);
+    });
+    Ok(())
+}
+
 #[tauri::command]
 fn get_settings(state: State<AppState>) -> Settings {
     state.settings.lock().unwrap().clone()
@@ -581,6 +595,7 @@ pub fn run() {
             export_profile,
             import_profile,
             set_pad_profile,
+            set_ui_colors,
             list_sound_library,
             get_presets_for,
             add_soundfont,

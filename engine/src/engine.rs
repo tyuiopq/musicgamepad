@@ -66,6 +66,17 @@ pub struct Settings {
     pub transport: TransportSettings,
     /// Какой профиль включать для какого семейства геймпадов (xbox, play_station, nintendo, generic).
     pub pad_profiles: HashMap<String, String>,
+    /// Оформление интерфейса (движку не нужно, хранится вместе с настройками).
+    pub ui: UiSettings,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UiSettings {
+    /// Основной акцент (ноты, главные кнопки), «#rrggbb».
+    pub accent: Option<String>,
+    /// Второй акцент (модификаторы, слои).
+    pub secondary: Option<String>,
 }
 
 impl Default for Settings {
@@ -80,6 +91,7 @@ impl Default for Settings {
             profile: None,
             transport: TransportSettings::default(),
             pad_profiles: HashMap::new(),
+            ui: UiSettings::default(),
         }
     }
 }

@@ -235,175 +235,172 @@
   <p class="muted">Загружаю профиль…</p>
 {:else}
   <div class="editor">
-    <header class="top">
-      <input
-        class="name"
-        aria-label="Название профиля"
-        bind:value={draft.name}
-        oninput={changed}
-        maxlength="60"
-      />
-      <span class="state" class:dirty>{dirty ? "Есть несохранённые изменения" : "Сохранено"}</span>
-      <div class="actions">
-        {#if dirty}
-          <button type="button" class="ghost" onclick={revert}>Отменить</button>
-        {/if}
-        <button type="button" class="primary" disabled={!dirty} onclick={save}>Сохранить</button>
-        <button type="button" class="ghost" onclick={copy} title="Сделать копию профиля и править её">Копия</button>
+    <header class="card head">
+      <div class="title-row">
+        <input class="name" aria-label="Название профиля" bind:value={draft.name} oninput={changed} maxlength="60" />
+        <span class="status" class:dirty>{dirty ? "Не сохранено" : "Сохранено"}</span>
+        <span class="spacer"></span>
+        {#if dirty}<button type="button" class="btn btn-ghost" onclick={revert}>Отменить</button>{/if}
+        <button type="button" class="btn btn-primary" disabled={!dirty} onclick={save}>Сохранить</button>
+        <button type="button" class="btn btn-ghost" onclick={copy} title="Сделать копию профиля и править её">Копия</button>
         {#if entry?.builtin && entry.modified}
-          <button type="button" class="ghost danger" onclick={remove}>
-            {confirmDelete ? "Точно вернуть?" : "Вернуть заводской"}
-          </button>
+          <button type="button" class="btn btn-danger" onclick={remove}>{confirmDelete ? "Точно вернуть?" : "Вернуть заводской"}</button>
         {:else if entry && !entry.builtin}
-          <button type="button" class="ghost danger" onclick={remove}>{confirmDelete ? "Точно удалить?" : "Удалить"}</button>
+          <button type="button" class="btn btn-danger" onclick={remove}>{confirmDelete ? "Точно удалить?" : "Удалить"}</button>
         {/if}
+      </div>
+      <div class="toolbar">
+        <div class="seg tabs" role="tablist" aria-label="Раздел профиля">
+          <button type="button" role="tab" aria-selected={tab === "buttons"} class:on={tab === "buttons"} onclick={() => (tab = "buttons")}>Кнопки</button>
+          <button type="button" role="tab" aria-selected={tab === "sound"} class:on={tab === "sound"} onclick={() => (tab = "sound")}>Звук</button>
+        </div>
+        <span class="spacer"></span>
+        <label class="mini">
+          <span>Тоника</span>
+          <select
+            class="select select-sm"
+            value={draft.music.root}
+            onchange={(e) => {
+              draft!.music.root = Number(e.currentTarget.value);
+              changed();
+            }}
+          >
+            {#each ROOT_NAMES as name, i (i)}<option value={i}>{name}</option>{/each}
+          </select>
+        </label>
+        <label class="mini">
+          <span>Лад</span>
+          <select
+            class="select select-sm"
+            value={draft.music.scale.type === "preset" ? draft.music.scale.preset : "major"}
+            onchange={(e) => {
+              draft!.music.scale = { type: "preset", preset: e.currentTarget.value as ScalePreset };
+              changed();
+            }}
+          >
+            {#each SCALE_NAMES as [id, name] (id)}<option value={id}>{name}</option>{/each}
+          </select>
+        </label>
+        <label class="mini">
+          <span>Октава</span>
+          <select
+            class="select select-sm"
+            value={draft.music.octave}
+            onchange={(e) => {
+              draft!.music.octave = Number(e.currentTarget.value);
+              changed();
+            }}
+          >
+            {#each [1, 2, 3, 4, 5, 6] as o (o)}<option value={o}>{o}{o === 4 ? " (первая)" : ""}</option>{/each}
+          </select>
+        </label>
       </div>
     </header>
 
     {#if error}<p class="error">{error}</p>{/if}
 
-    <div class="music">
-      <label>
-        <span class="muted">Тоника</span>
-        <select
-          value={draft.music.root}
-          onchange={(e) => {
-            draft!.music.root = Number(e.currentTarget.value);
-            changed();
-          }}
-        >
-          {#each ROOT_NAMES as name, i (i)}<option value={i}>{name}</option>{/each}
-        </select>
-      </label>
-      <label>
-        <span class="muted">Лад</span>
-        <select
-          value={draft.music.scale.type === "preset" ? draft.music.scale.preset : "major"}
-          onchange={(e) => {
-            draft!.music.scale = { type: "preset", preset: e.currentTarget.value as ScalePreset };
-            changed();
-          }}
-        >
-          {#each SCALE_NAMES as [id, name] (id)}<option value={id}>{name}</option>{/each}
-        </select>
-      </label>
-      <label>
-        <span class="muted">Октава</span>
-        <select
-          value={draft.music.octave}
-          onchange={(e) => {
-            draft!.music.octave = Number(e.currentTarget.value);
-            changed();
-          }}
-        >
-          {#each [1, 2, 3, 4, 5, 6] as o (o)}<option value={o}>{o}{o === 4 ? " (первая)" : ""}</option>{/each}
-        </select>
-      </label>
-    </div>
-
-    <div class="tabs" role="tablist" aria-label="Раздел профиля">
-      <button type="button" role="tab" aria-selected={tab === "buttons"} class:on={tab === "buttons"} onclick={() => (tab = "buttons")}>
-        Кнопки
-      </button>
-      <button type="button" role="tab" aria-selected={tab === "sound"} class:on={tab === "sound"} onclick={() => (tab = "sound")}>
-        Звук
-      </button>
-    </div>
-
     {#if tab === "sound"}
       <SoundPanel profile={draft} {presets} onchange={changed} onaudition={audition} ontest={sendTest} />
     {:else}
-    <nav class="layers" aria-label="Слои раскладки">
-      {#each draft.layers as l (l.id)}
-        <button type="button" class:on={l.id === layerId} aria-pressed={l.id === layerId} onclick={() => selectLayer(l.id)}>
-          {l.name}
-        </button>
-      {/each}
-      <button type="button" class="add" onclick={() => selectLayer(newLayer())}>+ Слой</button>
-    </nav>
+      <div class="work">
+        <section class="card pad">
+          <div class="layer-row">
+            <div class="layers" role="tablist" aria-label="Слои раскладки">
+              {#each draft.layers as l (l.id)}
+                <button type="button" role="tab" aria-selected={l.id === layerId} class:on={l.id === layerId} onclick={() => selectLayer(l.id)}>
+                  {l.name}
+                </button>
+              {/each}
+              <button type="button" class="add" onclick={() => selectLayer(newLayer())}>+ Слой</button>
+            </div>
+            <button type="button" class="btn btn-sm" class:listening onclick={() => (listening ? (listening = false) : startListening())}>
+              {listening ? "Нажми на геймпаде… (отмена)" : "Назначить с геймпада"}
+            </button>
+          </div>
 
-    {#if layer.id !== "base"}
-      {@const triggers = layerTriggers(draft, layer.id)}
-      <div class="layer-bar">
-        <input aria-label="Название слоя" bind:value={layer.name} oninput={changed} maxlength="40" />
-        <details class="combo">
-          <summary>{layer.combo?.length ? `Комбинация: ${layer.combo.map((id) => draft!.layers.find((l) => l.id === id)?.name ?? id).join(" + ")}` : "Сделать комбинацией слоёв…"}</summary>
-          <p class="muted small">
-            Слой включится сам, когда включены все отмеченные слои (например, LB + RB). Комбинация важнее слоёв, из которых
-            состоит; среди остальных главнее тот, что ниже в списке вкладок.
-          </p>
-          {#each draft.layers.filter((l) => l.id !== "base" && l.id !== layer.id) as other (other.id)}
-            <label class="check">
-              <input
-                type="checkbox"
-                checked={layer.combo?.includes(other.id) ?? false}
-                onchange={(e) => {
-                  const set = new Set(layer.combo ?? []);
-                  if (e.currentTarget.checked) set.add(other.id);
-                  else set.delete(other.id);
-                  layer.combo = [...set];
-                  changed();
-                }}
-              />
-              {other.name}
-            </label>
-          {/each}
-        </details>
-        <span class="muted">
-          {#if layer.combo?.length}
-            Включается комбинацией слоёв.
-          {:else if triggers.length}
-            Включается: {triggers
-              .map((b) => `${inputLabel(b.input)}${b.action.kind === "modifier" && b.action.latch === "toggle" ? " (переключатель)" : " (пока зажата)"}`)
-              .join(", ")}
-          {:else}
-            Пока ничем не включается — назначь модификатор «Слой» на кнопку в основном слое.
-          {/if}
-        </span>
-        <button type="button" class="ghost danger" onclick={() => removeLayer(layer.id)}>Удалить слой</button>
-      </div>
-    {/if}
-
-    <div class="work">
-      <section class="pad">
-        <div class="pad-tools">
-          <button type="button" class="ghost" class:listening onclick={() => (listening ? (listening = false) : startListening())}>
-            {listening ? "Нажми кнопку на геймпаде… (отмена)" : "Назначить с геймпада"}
-          </button>
           {#if layer.id !== "base"}
-            <span class="muted small">Бледные — из основного слоя</span>
+            {@const triggers = layerTriggers(draft, layer.id)}
+            <div class="layer-bar">
+              <div class="row">
+                <input class="input input-sm" style="width: 180px" aria-label="Название слоя" bind:value={layer.name} oninput={changed} maxlength="40" />
+                <span class="hint ellipsis" style="flex: 1">
+                  {#if layer.combo?.length}
+                    Включается комбинацией слоёв.
+                  {:else if triggers.length}
+                    Включается: {triggers
+                      .map((b) => `${inputLabel(b.input)}${b.action.kind === "modifier" && b.action.latch === "toggle" ? " (переключатель)" : " (пока зажата)"}`)
+                      .join(", ")}
+                  {:else}
+                    Пока ничем не включается — назначь модификатор «Слой» в основном слое.
+                  {/if}
+                </span>
+                <button type="button" class="btn btn-sm btn-danger" onclick={() => removeLayer(layer.id)}>Удалить слой</button>
+              </div>
+              <details class="combo">
+                <summary>
+                  {layer.combo?.length
+                    ? `Комбинация: ${layer.combo.map((id) => draft!.layers.find((l) => l.id === id)?.name ?? id).join(" + ")}`
+                    : "Сделать комбинацией слоёв…"}
+                </summary>
+                <p class="hint">
+                  Слой включится сам, когда включены все отмеченные (например, LB + RB). Комбинация важнее своих частей; среди остальных
+                  главнее тот, что правее во вкладках.
+                </p>
+                <div class="row wrap" style="--gap: 14px">
+                  {#each draft.layers.filter((l) => l.id !== "base" && l.id !== layer.id) as other (other.id)}
+                    <label class="row" style="--gap: 6px">
+                      <input
+                        type="checkbox"
+                        checked={layer.combo?.includes(other.id) ?? false}
+                        onchange={(e) => {
+                          const set = new Set(layer.combo ?? []);
+                          if (e.currentTarget.checked) set.add(other.id);
+                          else set.delete(other.id);
+                          layer.combo = [...set];
+                          changed();
+                        }}
+                      />
+                      {other.name}
+                    </label>
+                  {/each}
+                </div>
+              </details>
+            </div>
           {/if}
-        </div>
-        <Gamepad
-          controls={preview}
-          pressed={status.pressed}
-          axes={status.axes}
-          {family}
-          profile={draft}
-          {selected}
-          onselect={(c) => (selected = c)}
-          focusLayer={layer.id}
-        />
-      </section>
 
-      <aside class="inspect">
-        {#if selected}
-          <Inspector
-            control={selected}
-            {layer}
-            profile={draft}
-            {family}
+          <Gamepad
+            controls={preview}
+            pressed={status.pressed}
             axes={status.axes}
-            {presets}
-            midiPort={status.midi.port}
-            onchange={onBinding}
-            onnewlayer={newLayer}
+            {family}
+            profile={draft}
+            {selected}
+            onselect={(c) => (selected = c)}
+            focusLayer={layer.id}
           />
-        {:else}
-          <p class="muted">Выбери кнопку, курок или стик на схеме — или нажми «Назначить с геймпада» и коснись нужного.</p>
-        {/if}
-      </aside>
-    </div>
+          <p class="hint center">
+            {layer.id !== "base" ? "Бледные — назначения из основного слоя. " : ""}Кликни по кнопке, курку или стику, чтобы настроить.
+          </p>
+        </section>
+
+        <aside class="card inspect">
+          {#if selected}
+            <Inspector
+              control={selected}
+              {layer}
+              profile={draft}
+              {family}
+              axes={status.axes}
+              {presets}
+              midiPort={status.midi.port}
+              onchange={onBinding}
+              onnewlayer={newLayer}
+            />
+          {:else}
+            <p class="hint">Выбери кнопку, курок или стик на схеме — или нажми «Назначить с геймпада» и коснись нужного.</p>
+          {/if}
+        </aside>
+      </div>
     {/if}
   </div>
 {/if}
@@ -412,125 +409,88 @@
   .editor {
     display: flex;
     flex-direction: column;
+    gap: 16px;
+  }
+  .head {
     gap: 14px;
   }
-  .top {
+  .title-row,
+  .toolbar {
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
+    flex-wrap: wrap;
   }
   .name {
-    font: inherit;
-    font-family: var(--font-display);
-    font-size: 22px;
-    font-weight: 700;
-    color: var(--text);
-    background: transparent;
+    flex: 0 1 380px;
+    min-width: 160px;
+    height: 40px;
+    padding: 0 10px;
+    margin-left: -10px;
     border: 1px solid transparent;
-    border-radius: 8px;
-    padding: 4px 8px;
-    min-width: 0;
-    flex: 0 1 360px;
+    border-radius: var(--r-sm);
+    background: transparent;
+    font-family: var(--font-display);
+    font-size: 20px;
+    font-weight: 700;
   }
   .name:hover,
   .name:focus {
     border-color: var(--line-strong);
+    outline: none;
   }
-  .state {
+  .status {
+    width: 110px;
     font-size: 13px;
     color: var(--muted);
   }
-  .state.dirty {
+  .status.dirty {
     color: var(--accent);
   }
-  .actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-left: auto;
-  }
-  button.primary,
-  button.ghost {
-    min-height: 36px;
-    padding: 0 14px;
-    border-radius: 10px;
-    border: 1px solid var(--line-strong);
-    background: transparent;
-  }
-  button.primary {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: var(--bg);
-    font-weight: 600;
-  }
-  button.primary:disabled {
-    background: transparent;
-    color: var(--muted);
-    border-color: var(--line-strong);
-    cursor: default;
-  }
-  button.ghost:hover {
-    border-color: var(--accent);
-  }
-  button.danger {
-    color: var(--error);
-  }
   .tabs {
-    display: flex;
-    gap: 4px;
-    padding: 4px;
-    border-radius: 12px;
-    background: var(--panel);
-    align-self: flex-start;
+    width: 220px;
   }
-  .tabs button {
-    min-height: 36px;
-    padding: 0 18px;
-    border: none;
-    border-radius: 8px;
-    background: transparent;
-    color: var(--muted);
-  }
-  .tabs button.on {
-    background: var(--key);
-    color: var(--text);
-  }
-  .music {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 16px;
-  }
-  .music label {
+  .mini {
     display: flex;
     align-items: center;
-    gap: 8px;
-    font-size: 14px;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--muted);
   }
-  select,
-  .layer-bar input {
-    min-height: 36px;
-    padding: 0 10px;
-    border-radius: 8px;
-    border: 1px solid var(--line-strong);
-    background: var(--raised);
-    color: var(--text);
-    font: inherit;
+  .work {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 380px;
+    gap: 16px;
+    align-items: start;
+  }
+  @media (max-width: 1100px) {
+    .work {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+  .layer-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
   }
   .layers {
+    flex: 1;
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
-    border-bottom: 1px solid var(--line);
-    padding-bottom: 10px;
+    min-width: 0;
   }
   .layers button {
-    min-height: 36px;
-    padding: 0 14px;
+    height: 30px;
+    padding: 0 12px;
     border-radius: 999px;
     border: 1px solid var(--line-strong);
     background: transparent;
     color: var(--muted);
+    font-size: 13px;
+  }
+  .layers button:hover {
+    color: var(--text);
   }
   .layers button.on {
     border-color: var(--mod);
@@ -540,49 +500,8 @@
   .layers .add {
     border-style: dashed;
   }
-  .layer-bar {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 12px;
-    font-size: 13px;
-  }
-  .layer-bar span {
-    flex: 1 1 240px;
-  }
-  .combo {
-    flex-basis: 100%;
-    font-size: 13px;
-  }
-  .combo summary {
-    cursor: pointer;
-    color: var(--mod);
-  }
-  .combo .check {
-    display: inline-flex;
-    gap: 6px;
-    margin-right: 14px;
-  }
-  .work {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 20px;
-    align-items: flex-start;
-  }
-  .pad {
-    flex: 999 1 480px;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-  .pad-tools {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
   .listening {
-    border-color: var(--accent) !important;
+    border-color: var(--accent);
     color: var(--accent);
     animation: pulse 1.2s infinite;
   }
@@ -591,16 +510,36 @@
       opacity: 0.6;
     }
   }
-  .inspect {
-    flex: 1 1 340px;
-    max-width: 420px;
-    background: var(--panel);
+  .layer-bar {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px;
+    border-radius: var(--r-md);
+    background: var(--surface-2);
     border: 1px solid var(--line);
-    border-radius: 14px;
-    padding: 16px;
-    box-sizing: border-box;
   }
-  .small {
+  .combo summary {
+    cursor: pointer;
     font-size: 13px;
+    color: var(--mod);
+  }
+  .combo[open] summary {
+    margin-bottom: 6px;
+  }
+  .combo label {
+    font-size: 13px;
+  }
+  .combo input {
+    accent-color: var(--accent);
+  }
+  .center {
+    text-align: center;
+  }
+  .inspect {
+    position: sticky;
+    top: 20px;
+    max-height: calc(100vh - 40px);
+    overflow-y: auto;
   }
 </style>

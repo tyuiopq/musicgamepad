@@ -533,7 +533,7 @@
           "text": "Установи бесплатную программу loopMIDI и создай в ней порт (например, «loopMIDI Port»). Это «провод» от MusicGamepad к DAW."
         },
         {
-          "text": "Здесь, в боковой панели: выбери MIDI-выход «loopMIDI Port» и сними «Встроенный синтезатор», чтобы звук не двоился."
+          "text": "Здесь, в «Настройках»: выбери MIDI-выход «loopMIDI Port» и выключи «Встроенный синтезатор», чтобы звук не двоился."
         },
         {
           "text": "В Ableton: Options → Preferences → Link, Tempo & MIDI. У входа «loopMIDI Port» включи Track и Remote."

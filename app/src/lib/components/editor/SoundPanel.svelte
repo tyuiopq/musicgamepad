@@ -391,13 +391,13 @@
 <style>
   .sound {
     display: grid;
-    grid-template-columns: minmax(200px, 240px) minmax(280px, 1fr) minmax(260px, 1fr);
+    grid-template-columns: 220px minmax(340px, 1fr) 300px;
     gap: 20px;
     align-items: start;
   }
-  @media (max-width: 1100px) {
+  @media (max-width: 1180px) {
     .sound {
-      grid-template-columns: minmax(200px, 240px) minmax(0, 1fr);
+      grid-template-columns: 220px minmax(0, 1fr);
     }
     .instruments {
       grid-column: 1 / -1;

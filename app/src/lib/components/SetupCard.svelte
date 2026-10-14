@@ -55,7 +55,7 @@
     {#if open}
       {#if wantsDaw && (status.synth.enabled || !status.midi.port)}
         <p class="warn">
-          {#if !status.midi.port}Сейчас MIDI-выход не выбран — DAW ничего не получит.{/if}
+          {#if !status.midi.port}MIDI-выход не выбран (он в «Настройках») — DAW ничего не получит.{/if}
           {#if status.synth.enabled}
             Встроенный звук включён и будет звучать вместе с DAW.
             <button type="button" class="link" onclick={() => run(() => api.setSynthEnabled(false))}>Выключить встроенный звук</button>

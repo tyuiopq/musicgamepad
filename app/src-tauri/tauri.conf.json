@@ -13,10 +13,10 @@
     "windows": [
       {
         "title": "MusicGamepad",
-        "width": 1200,
-        "height": 860,
-        "minWidth": 960,
-        "minHeight": 700
+        "width": 1280,
+        "height": 920,
+        "minWidth": 1000,
+        "minHeight": 720
       }
     ],
     "security": {
