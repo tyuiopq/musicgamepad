@@ -33,6 +33,7 @@
       await action();
     } catch (e) {
       error = String(e);
+      api.logUi("error", error);
     }
   }
 
@@ -43,6 +44,11 @@
   });
 
   onMount(() => {
+    // Необработанные ошибки интерфейса — в журнал (в файлах программы)
+    const onError = (e: ErrorEvent) => api.logUi("error", `${e.message} (${e.filename}:${e.lineno})`);
+    const onRejection = (e: PromiseRejectionEvent) => api.logUi("error", String(e.reason?.stack ?? e.reason));
+    window.addEventListener("error", onError);
+    window.addEventListener("unhandledrejection", onRejection);
     const unlisten = api.onStatus((s) => (status = s));
     api.status().then((s) => (status ??= s));
     refreshProfiles();
@@ -51,6 +57,8 @@
       applyTheme(theme);
     });
     return () => {
+      window.removeEventListener("error", onError);
+      window.removeEventListener("unhandledrejection", onRejection);
       unlisten.then((f) => f());
     };
   });

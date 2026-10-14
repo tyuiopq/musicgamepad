@@ -1,6 +1,6 @@
 <script lang="ts">
   // Простые контурные иконки (24×24, цвет — currentColor).
-  let { name, size = 18 }: { name: "play" | "profile" | "records" | "settings" | "library" | "refresh" | "stop"; size?: number } = $props();
+  let { name, size = 18 }: { name: "play" | "profile" | "records" | "settings" | "library" | "refresh" | "stop" | "log" | "help"; size?: number } = $props();
 </script>
 
 <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -24,6 +24,12 @@
     <path d="M4 5h4v14H4zM10 5h4v14h-4zM16.5 5.5l3.5 1-3 12.5-3.5-1z" />
   {:else if name === "refresh"}
     <path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6" />
+  {:else if name === "log"}
+    <path d="M7 3.5h7l4 4V20a.5.5 0 0 1-.5.5h-10A.5.5 0 0 1 7 20z" />
+    <path d="M12 9.5v4.5M12 17v.2" />
+  {:else if name === "help"}
+    <circle cx="12" cy="12" r="9" />
+    <path d="M9.6 9.4a2.5 2.5 0 1 1 3.4 2.3c-.6.3-1 .8-1 1.5v.6M12 17v.2" />
   {:else if name === "stop"}
     <path d="M5 9v6M9 7v10M13 9v6M17 11v2" />
   {/if}

@@ -435,6 +435,9 @@ export const api = {
   deleteRecording: (name: string) => invoke<void>("delete_recording", { name }),
   panic: () => invoke<void>("panic"),
   openRecordings: () => invoke<void>("open_recordings"),
+  openLogs: () => invoke<void>("open_logs"),
+  /** Записать в журнал ошибок; сама никогда не падает. */
+  logUi: (level: "error" | "warn", message: string) => invoke<void>("log_ui", { level, message }).catch(() => undefined),
   onStatus: async (cb: (s: Status) => void): Promise<UnlistenFn> => {
     if (inApp) return listen<Status>("status", (e) => cb(e.payload));
     const { demoListen } = await import("./demo");

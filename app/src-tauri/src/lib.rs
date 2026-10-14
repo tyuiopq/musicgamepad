@@ -1,5 +1,6 @@
 //! Оболочка Tauri: команды для интерфейса, настройки и профили на диске.
 
+mod applog;
 mod profiles;
 mod safefile;
 
@@ -594,6 +595,18 @@ fn panic(state: State<AppState>) {
 }
 
 #[tauri::command]
+fn open_logs(app: AppHandle) -> CmdResult<()> {
+    let dir = applog::dir().ok_or("журнал не настроен")?;
+    app.opener().open_path(dir.to_string_lossy(), None::<&str>).map_err(|e| e.to_string())
+}
+
+/// Ошибка из интерфейса (необработанное исключение, неудачная команда) — в журнал.
+#[tauri::command]
+fn log_ui(level: String, message: String) {
+    applog::write(&level.to_uppercase(), &format!("интерфейс: {message}"));
+}
+
+#[tauri::command]
 fn open_recordings(app: AppHandle, state: State<AppState>) -> CmdResult<()> {
     let dir = &state.recordings;
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
@@ -608,6 +621,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let data_dir = path.app_data_dir()?;
     let recordings = path.document_dir().map(|d| d.join("MusicGamepad")).unwrap_or_else(|_| data_dir.join("recordings"));
     std::fs::create_dir_all(&config_dir)?;
+    applog::init(&data_dir.join("logs"));
     let settings_path = config_dir.join("settings.json");
     let profiles = ProfileStore::new(data_dir.join("profiles"));
 
@@ -634,8 +648,20 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         {
             let mut last_family: Option<String> = None;
             let mut last_programs: Option<(String, Vec<(u8, u16)>)> = None;
+            let mut errors = applog::Changes::default();
             move |status: &Status| {
                 let _ = handle.emit("status", status);
+                errors.track("звук", status.synth.error.as_deref());
+                errors.track("звук (запасной режим)", status.synth.fallback.as_deref());
+                errors.track("геймпады", status.input_error.as_deref());
+                errors.track("MIDI-выход", status.midi.error.as_deref());
+                errors.track("MIDI Clock", status.midi.clock_in_error.as_deref());
+                for x in &status.midi.extra {
+                    errors.track(&format!("MIDI-выход «{}»", x.port), x.error.as_deref());
+                }
+                for p in &status.parts {
+                    errors.track(&format!("партия «{}»", p.name), p.error.as_deref());
+                }
                 // Инструменты поменялись в самом движке (не загрузкой профиля) — запоминаем
                 let programs: Vec<(u8, u16)> = status.parts.iter().map(|p| (p.program, p.bank)).collect();
                 if let Some((name, prev)) = &last_programs
@@ -731,6 +757,8 @@ pub fn run() {
             delete_recording,
             panic,
             open_recordings,
+            open_logs,
+            log_ui,
         ])
         .build(tauri::generate_context!())
         .expect("ошибка запуска приложения")

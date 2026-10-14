@@ -64,7 +64,12 @@
 </script>
 
 <div class="settings">
-  <h1 class="h1">Настройки</h1>
+  <div class="title-row">
+    <h1 class="h1">Настройки</h1>
+    <button type="button" class="btn btn-ghost btn-icon log" title="Журнал ошибок (папка с файлом)" aria-label="Журнал ошибок" onclick={() => run(api.openLogs)}>
+      <Icon name="log" size={16} />
+    </button>
+  </div>
 
   <div class="grid">
     <section class="card">
@@ -305,6 +310,18 @@
 </div>
 
 <style>
+  .title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .log {
+    color: var(--muted);
+    opacity: 0.6;
+  }
+  .log:hover {
+    opacity: 1;
+  }
   .settings {
     display: flex;
     flex-direction: column;
